@@ -1,18 +1,18 @@
 📦 SDx Export to MerchantPro API
-Module for OpenCart 1.5.x → MerchantPro API product synchronization
+Module for OpenCart 1.5.x → MerchantPro API product/categories synchronization
 This tool provides a structured way to export/sync OpenCart 1.5.x product, category, attribute, and auxiliary data into MerchantPro (MP) using the MP API.
 It is designed for a custom and modernized OpenCart 1.5.5 installation upgraded to PHP 8.3, with a legacy-preserved and customized jQuery 1.7 environment.
 
 🚀 Features
-Extracts data from OpenCart 1.5.x (products, categories, attributes, etc.)
-Loads MerchantPro product data through XLSX feeds (feeds URLs stored beside API settings)
-Merges & consolidates the MP feeds (simple & variable vs. variants) into a unified product dataset
-Generates a JSON cache file containing MP products
-MP products with ext_ref (identifiable)
-MP products without ext_ref (susceptible to deletion)
-Provides admin-side UI for monitoring, triggering sync, and reviewing data
-Stores API configuration using standard OC setting table mechanisms
-Fully compatible with a heavily customized OC1.5 on PHP 8.3
+Extracts data from OpenCart 1.5.x (products, categories, attributes, etc.).
+Loads MerchantPro product data through XLSX feeds (feeds URLs stored beside API settings).
+Merges & consolidates the MP feeds (simple & variable vs. variants) into a unified product dataset.
+Generates a JSON cache file containing MP products.
+MP products with ext_ref (identifiable).
+MP products without ext_ref (susceptible to deletion).
+Provides admin-side UI for monitoring, triggering sync, and reviewing data.
+Stores API configuration using standard OC setting table mechanisms.
+Fully compatible with a heavily customized OC1.5 on PHP 8.3.
 
 📁 OpenCart Module Structure (Standard OC 1.5 Routing)
 The module follows the classic OpenCart 1.5.x admin routing pattern:
@@ -69,12 +69,13 @@ Simple + variable products feed
 Variant products feed
 
 2. Parse & Combine Data
-The tool analyzes, merges, and normalizes both XLSX sources into one consolidated dataset.
+The tool analyzes, merges, and normalizes both XLSX sources into one consolidated dataset - also as XLSX.
 
 3. Generate JSON Cache
 A JSON cache file of MP products is created, splitting entries into:
 Products with ext_ref → can be matched with OpenCart products
 Products without ext_ref → unidentifiable, potentially removable or problematic
+I same time, JSON cache files are generated - via MP API - for categories and taxonomies (taxes, measurement units, etc)
 
 4. Sync / Export Logic
 Handled within the controller and model:
@@ -91,7 +92,7 @@ PHP 8.3 compatible environment
 
 cURL enabled
 
-XLSX parsing library compatible with PHP 8.x
+SimpleXLSX & SimpleXLSXGen - XLSX library for parsing & generating the XLSX files, compatible with PHP 8.x
 // require libraries
 require_once(DIR_SYSTEM . '/library/SimpleXLSX/SimpleXLSX.php');
 require_once(DIR_SYSTEM . '/library/SimpleXLSXGen/SimpleXLSXGen.php');
@@ -114,6 +115,7 @@ Begin synchronization using the admin interface.
 
 📌 Notes
 This module interacts with MerchantPro exclusively through its official API endpoints.
+more info at https://docs.merchantpro.com/api/
 It does not modify core OpenCart data unless explicitly implemented in controller/model logic.
 The system is optimized for large product catalogs and repeated exports.
 
@@ -122,9 +124,7 @@ This project is proprietary and intended for specific deployment.
 Redistribution is not permitted unless explicitly authorized.
 
 🤝 Contributions
-
 Although this repository is currently focused on internal development, contributions (PRs, issues, improvements) may be considered in the future.
 
 📬 Support
-
 For code review, enhancements, or debugging assistance, please contact the project maintainer.
