@@ -1,33 +1,7 @@
-# ---------------------------
-# OPEN CART 1.5.x GITIGNORE
-# Highly customized version, no vQmod / OCMOD
-# ---------------------------
-
-# Ignore system logs & cache
-system/cache/
-system/logs/
-download/
-
-# Ignore image cache
-image/cache/
-
-# Ignore configs containing database credentials
-config.php
-admin/config.php
-
-# Ignore backup files
-*.sql
-*.zip
-*.tar
-*.gz
-*.rar
-*.7z
-*.bak
-*.old
-
-# Ignore logs
-*.log
-error_log*
+# ----------------------------
+# GITIGNORE FOR OPENCART 1.5 ADMIN MODULE
+# Only admin-related module files are versioned
+# ----------------------------
 
 # Ignore OS files
 Thumbs.db
@@ -37,12 +11,19 @@ Thumbs.db
 .vscode/
 *.code-workspace
 
-# Ignore Composer files (if someone used composer)
-vendor/
+# Ignore backup files
+*.zip
+*.sql
+*.bak
+*.old
+*.tar
+*.gz
+*.rar
+*.7z
 
-# Ignore node/npm files (if used)
-node_modules/
+# Ignore logs
+*.log
+error_log*
 
-# Ignore env files
-.env
-.env.*
+# (Optional) Ignore PHPStorm/IntelliJ metadata
+.idea/
