@@ -125,9 +125,7 @@ Begin synchronization using the admin interface.
 
 📌 Notes
 This module interacts with MerchantPro exclusively through its official API endpoints.
-```htm
-more info at https://docs.merchantpro.com/api/
-```
+More info at [https://docs.merchantpro.com/api/]https://docs.merchantpro.com/api/
 It does not modify core OpenCart data unless explicitly implemented in controller/model logic.
 The system is optimized for large product catalogs and repeated exports.
 
