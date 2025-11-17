@@ -17,6 +17,7 @@ Fully compatible with a heavily customized OC1.5 on PHP 8.3.
 📁 OpenCart Module Structure (Standard OC 1.5 Routing)
 The module follows the classic OpenCart 1.5.x admin routing pattern:
 
+```python
 admin/
 ├── controller/
 │   └── tool/
@@ -35,27 +36,34 @@ admin/
     └── template/
         └── tool/
             └── sdx_export_to_mp_sync.tpl
+```
 
 ⚙️ MerchantPro API Configuration
 MerchantPro API settings are stored using the native OC 1.5 setting table conventions.
 
+```php
 // Load settings & derive store slug
 $this->load->model('setting/setting');
 $settings = $this->model_setting_setting->getSetting('sdx_export_to_mp_sync');
+```
 
+```php
 // Grouped API settings
 $api = isset($settings['sdx_export_to_mp_sync_api']) 
     ? $settings['sdx_export_to_mp_sync_api'] 
     : array();
+```
 
 The $api settings array includes:
 Key	- Description
+```
 $api['mp_api_url']	- MerchantPro API base URL (e.g., https://www.okled.ro)
 $api['mp_api_name']	- Informational name for the connection
 $api['mp_api_key']	- API username
 $api['mp_api_secret']	- API password
 $api['mp_feed_simple']	- URL to XLSX feed for simple/variable products (no variants)
 $api['mp_feed_variants']	- URL to XLSX feed for product variants
+```
 
 Additionally: sdx_export_to_mp_sync_module
 Stored in the setting table (group sdx_export_to_mp_sync)
@@ -93,9 +101,11 @@ PHP 8.3 compatible environment
 cURL enabled
 
 SimpleXLSX & SimpleXLSXGen - XLSX library for parsing & generating the XLSX files, compatible with PHP 8.x
+```php
 // require libraries
 require_once(DIR_SYSTEM . '/library/SimpleXLSX/SimpleXLSX.php');
 require_once(DIR_SYSTEM . '/library/SimpleXLSXGen/SimpleXLSXGen.php');
+```
 
 🔧 Installation
 Upload the admin folder to your OpenCart installation:
