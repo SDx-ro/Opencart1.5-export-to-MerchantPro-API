@@ -94,9 +94,9 @@ Admin interface (.tpl) provides visualization & controls.
 
 🏗️ Requirements
 OpenCart 1.5.x (customized)
+(This module assumes you are running a modernized OC1.5 with deprecated code already upgraded.)
 
 PHP 8.3 compatible environment
-(This module assumes you are running a modernized OC1.5 with deprecated code already upgraded.)
 
 cURL enabled
 
@@ -125,7 +125,9 @@ Begin synchronization using the admin interface.
 
 📌 Notes
 This module interacts with MerchantPro exclusively through its official API endpoints.
+```htm
 more info at https://docs.merchantpro.com/api/
+```
 It does not modify core OpenCart data unless explicitly implemented in controller/model logic.
 The system is optimized for large product catalogs and repeated exports.
 
