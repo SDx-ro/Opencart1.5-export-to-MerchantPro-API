@@ -1,6 +1,6 @@
 <?php echo $header; ?>
 
-<!-- v1.4 template SDxExportToMPSync -->
+<!-- v1.5 template SDxExportToMPSync -->
 
 <style type="text/css">
 /* Small helper styles (OC1.5 safe) */
@@ -37,21 +37,26 @@
 .mp-sync-in_mp_by_sku { background:#eff0e8; color:#3d763e; }
 
 /* Reuse badge colors for category sync codes */
-.mp-sync-ok { background:#dff0d8; color:#3c763d; } /* same as in_mp */
+.mp-sync-ok { background:#dff0d8; color:#3c763d; } 
 .mp-sync-only_oc,
-.mp-sync-only_mp {
-    background:#f2dede;
-    color:#a94442; /* same as missing */
-}
+.mp-sync-only_mp { background:#f2dede; color:#a94442; }
 .mp-sync-patch_name,
 .mp-sync-patch_parent,
 .mp-sync-patch_status,
-.mp-sync-patch_complex {
-    background:#fcf8e3;
-    color:#8a6d3b; /* same as out_of_sync */
-}
+.mp-sync-patch_complex { background:#fcf8e3; color:#8a6d3b; }
+.mp-sync-api_error { background:#eee; color:#666; }
 
-
+/* MP categories sync badge (OC vs MP categories) */
+/*
+.mp-cat-sync-ok { background:#dff0d8; color:#3c763d; }
+.mp-cat-sync-only_oc,
+.mp-cat-sync-only_mp { background:#f2dede; color:#a94442; }
+.mp-cat-sync-patch_name,
+.mp-cat-sync-patch_parent,
+.mp-cat-sync-patch_status,
+.mp-cat-sync-patch_complex { background:#fcf8e3; color:#8a6d3b; }
+.mp-cat-sync-api_error { background:#eee; color:#666; }
+*/
 </style>
 
 <div id="content">
@@ -78,7 +83,10 @@
                 <span class="warning" style="padding: .25em 2.25em; font-size: .75em; margin-bottom: 5px;"> <?php echo $text_mp_feed_update .' -> '. $text_current_mp_feed; ?> </span> &nbsp; 
                 <?php } ?>
                 <?php if ($updatempcats) { ?>
-                <span class="warning" style="padding: .25em 2.25em; font-size: .75em; margin-bottom: 5px;"> <?php echo $text_mp_feed_update .' -> '. $col_mp_category; ?> </span> &nbsp; 
+                <span class="warning" style="padding: .25em 2.25em; font-size: .75em; margin-bottom: 5px;"> <?php echo $text_mp_feed_update .' -> '. $col_mp_categories; ?> </span> &nbsp; 
+                <?php } ?>
+                <?php if ($updatemptaxes) { ?>
+                <span class="warning" style="padding: .25em 2.25em; font-size: .75em; margin-bottom: 5px;"> <?php echo $text_mp_feed_update .' -> '. $button_get_mp_taxonomies; ?> </span> &nbsp; 
                 <?php } ?>
             </h1>
             <div class="buttons">
@@ -88,6 +96,7 @@
         
         <div class="content" style="margin-bottom: 0; min-height: auto; background: lightyellow; padding: .5em;">
             
+            <!-- MerchatPro Categories from XLSX Consolidated Feed -->
             <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
                 <?php if (!empty($mp_export_consolidated_file)) { ?>
                 <?php echo $text_current_mp_feed.' <br> <small>'.$feeddate.'</small> <br> => <strong>'.$mp_export_consolidated_file.'</strong>'; ?>
@@ -119,7 +128,16 @@
                 <?php } ?>
                 
             </div>
+            <!-- MerchatPro Products from API -->
+            <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
+                <?php echo $text_current_mp_feed . ' <br> <small>' . $feeddate . '</small> <br> => <strong>'.$mp_export_consolidated_file.'</strong>'; ?>
+                <br>
+                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/buildMPallProductsCache', 'token=' . $token, 'SSL'); ?>" class="button link">
+                    <span class="<?php echo ($updatefeeds ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_products'); ?>
+                </a>
+            </div>
             
+            <!-- MerchatPro Categories from API -->
             <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
                 <?php echo $mpcategories_source . ' <br> <small>' . $mpcatsdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mpcategories_file).'</strong>'; ?>
                 <br>
@@ -128,17 +146,19 @@
                 </a>
             </div>
             
+            <!-- MerchatPro Taxonomies from API -->
             <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
                 <!--
                 <?php echo $mpcategories_source . ' <br> <small>' . $mpcatsdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mpcategories_file).'</strong>'; ?>
                 -->
-                <?php echo $this->language->get('text_get_mp_taxononies_help'); ?>
+                <?php echo $this->language->get('text_get_mp_taxonomies_help'); ?>
+                <br>
+                <?php echo '<small>' . $mptaxdate . '</small>'; ?>
                 <br>
                 <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/mpGetTaxonomies', 'token=' . $token, 'SSL'); ?>" class="button link">
-                    <span class="<?php echo ($updatempcats ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_taxononies'); ?>
+                    <span class="<?php echo ($updatemptaxes ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_taxonomies'); ?>
                 </a>
             </div>
-            
             
         </div>
         
@@ -147,6 +167,7 @@
             <div id="tabs" class="htabs">
                 <a href="#tab-products"><?php echo $tab_products; ?></a>
                 <a href="#tab-categories"><?php echo $tab_categories; ?></a>
+                <a href="#tab-mp-categories-delete"><?php echo $tab_mp_categories_delete; ?></a>
                 <a href="#tab-settings"><?php echo $tab_settings; ?></a>
             </div>
             
@@ -183,8 +204,8 @@
                     
                     <input type="hidden" name="selected_json" id="selected_json" value="">
                     
-                    <div id="export-progress" style="display:none; margin:10px 0;">
-                        <div id="progress-bar" style="background:#3c9; height:20px; width:0%; color:#fff; text-align:center;">0%</div>
+                    <div id="export_progress" style="display:none; margin:10px 0;">
+                        <div id="progress_bar" style="background:#3c9; height:20px; width:0%; color:#fff; text-align:center;">0%</div>
                     </div>
                     
                     <a class="button link" id="start-export" style="float: right;"><?php echo $button_export; ?> Selected</a>
@@ -277,8 +298,15 @@
                                             <?php } ?>
                                             
                                             <hr>
-                                            <?php if ($p['status'] == 1 && $p['mp_sync_status_code'] != 'collision') { ?>
-                                            <input type="checkbox" name="export-product[]" value="<?php echo $p['product_id_base']; ?>">
+                                            <?php if ($p['status'] == 1 && $p['product_type'] != 'variant' && $p['mp_sync_status_code'] != 'collision') { ?>
+                                            Select <input type="checkbox" name="export-product[]" value="<?php echo $p['product_id_base']; ?>">
+                                            <form action="<?php echo $apply_mp_products_sync; ?>" method="post" style="display:inline;">
+                                                <input type="hidden" name="product_action" value="patch" />
+                                                <input type="hidden" name="oc_product_id" value="<?php echo (int)$p['product_id_base']; ?>" />
+                                                <a href="#" class="button link" onclick="this.closest('form').submit(); return false;">
+                                                    <?php echo $button_mp_force_patch; ?>
+                                                </a>
+                                            </form>
                                             <?php } else { ?>
                                             <span class="muted">export <?php echo $text_disabled; ?></span>
                                             <?php } ?>
@@ -335,56 +363,95 @@
             </div>
             
             <div id="tab-categories" class="tab-content">
-                <p>
-                    <?php echo $text_categories_tab_info; ?> <br>
-                    <small><?php echo $mpcategories_source; ?></small>
-                </p>
+                <p><?php echo $text_categories_tab_info; ?></p>
                 
-                <table class="list" style="width:100%;">
+                <table class="list">
                     <thead>
                         <tr>
-                            <td class="left"><?php echo $col_category; ?></td>
-                            <td class="left"><?php echo $col_name; ?></td>
-                            <td class="left"><?php echo $col_mp_category; ?></td>
-                            <td class="left"><?php echo $col_mp_category_status; ?></td>
+                            <td class="left"><?php echo $col_category; ?> Opencart <hr> id :: <?php echo $col_name; ?></td>
+                            <td class="left">Path <?php echo $col_categories; /* reuse as "OC Path" if you like */ ?></td>
+                            <td class="left"><?php echo $col_category; ?> MerchantPro <hr> id :: <?php echo $col_name; ?></td>
+                            <td class="left">Path <?php echo $col_mp_categories; ?></td>
+                            <td class="left"><?php echo $col_mp_status; ?> <hr> <?php echo $col_action; ?></td>
                         </tr>
                     </thead>
                     <tbody>
-                        <?php if ($categories) { foreach ($categories as $cat) { ?>
+                        <?php if (!empty($categories)) { foreach ($categories as $cat) { ?>
                             <tr>
-                                <td class="left" style="width:80px;">
-                                    <?php echo $cat['category_id']; ?><br />
-                                    <span class="help">
-                                        <?php echo ($cat['status'] ? $text_enabled : $text_disabled); ?>
-                                    </span>
+                                <td>
+                                    <small class="nowrap"><?php echo (int)$cat['category_id']; ?> :: <b><?php echo $cat['name']; ?></b></small>
+                                    <!-- <?php echo (!empty($cat['image_url']) ? '<br><img src="'.$cat['image_url'].'" style="max-width: 100px; height: auto;">' : ''); ?> -->
+                                </td>
+                                <td>
+                                    <?php echo !empty($cat['path']) ? '<small class="nowrap" style="font-size: .75em;">'.$cat['path'].'</small>' : '&dash;'; ?>
                                 </td>
                                 
-                                <td class="left">
-                                    <strong><?php echo $cat['name']; ?></strong><br />
-                                    <?php if (!empty($cat['path'])) { ?>
-                                        <span class="help"><?php echo $cat['path']; ?></span>
-                                    <?php } ?>
+                                <td>
+                                    <?php echo (!empty($cat['mp_category_id']) ? '<small class="nowrap">'.$cat['mp_category_id'].' :: <b>'.$cat['mp_category_name'].'</b></small>' : '&dash;'); ?>
                                 </td>
-                                
-                                <td class="left">
-                                    <?php if (!empty($cat['mp_category_id'])) { ?>
-                                        <strong>#<?php echo $cat['mp_category_id']; ?></strong><br />
-                                        <?php if (!empty($cat['mp_category_path'])) { ?>
-                                            <span class="help"><?php echo $cat['mp_category_path']; ?></span>
-                                        <?php } ?>
-                                    <?php } else { ?>
-                                        <span class="help">&mdash;</span>
-                                    <?php } ?>
+                                <td>
+                                    <?php echo (!empty($cat['mp_category_path']) ? '<small class="nowrap" style="font-size: .75em;">'.$cat['mp_category_path'].'</small>' : '&dash;'); ?>
                                 </td>
-                                
-                                <td class="left">
+                                <td>
+                                    
                                     <?php if (!empty($cat['mp_category_sync_status_code'])) { ?>
                                         <span class="mp-sync-badge mp-sync-<?php echo $cat['mp_category_sync_status_code']; ?>">
                                             <?php echo $cat['mp_category_sync_status_text']; ?>
                                         </span>
-                                    <?php } else { ?>
-                                        <span class="help">?</span>
                                     <?php } ?>
+                                    
+                                    <?php if (in_array($cat['mp_category_sync_status_code'], array('ok','patch_name','patch_parent','patch_status','patch_complex')) && !empty($cat['mp_category_id'])) { ?>
+                                        <form method="post" action="<?php echo $apply_mp_categories_sync; ?>" style="display:inline;">
+                                            <input type="hidden" name="sync_action" value="patch" />
+                                            <input type="hidden" name="oc_category_id" value="<?php echo (int)$cat['category_id']; ?>" />
+                                            <input type="submit" value="<?php echo $button_mp_force_patch; ?>" class="button" style="border-radius: .5em; color: beige; background-color: #003A88; margin: .5em;" />
+                                        </form>
+                                    <?php } ?>
+                                    <?php if ($cat['mp_category_sync_status_code'] == 'only_oc') { ?>
+                                        <form method="post" action="<?php echo $apply_mp_categories_sync; ?>" style="display:inline;">
+                                            <input type="hidden" name="sync_action" value="post" />
+                                            <input type="hidden" name="oc_category_id" value="<?php echo (int)$cat['category_id']; ?>" />
+                                            <input type="submit" value="<?php echo $button_mp_force_post; ?>" class="button" style="border-radius: .5em; color: beige; background-color: #003A88; margin: .5em;" />
+                                        </form>
+                                    <?php } ?>
+                                    
+                                </td>
+                            </tr>
+                        <?php } } else { ?>
+                            <tr><td colspan="5"><?php echo $text_no_results; ?></td></tr>
+                        <?php } ?>
+                    </tbody>
+                </table>
+            </div>
+            
+            <div id="tab-mp-categories-delete" class="tab-content">
+                <p><?php echo $text_mp_categories_delete_info; ?></p>
+                
+                <table class="list" style="width:100%;">
+                    <thead>
+                        <tr>
+                            <td class="left" style="width:80px;"><?php echo $col_mp_category_id; ?></td>
+                            <td class="left"><?php echo $col_mp_category_path; ?></td>
+                            <td class="left"><?php echo $col_mp_status; ?></td>
+                            <td class="left"><?php echo $col_action; ?></td>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php if (!empty($mpcategories_delete_only)) { foreach ($mpcategories_delete_only as $mpcat) { ?>
+                            <tr>
+                                <td><?php echo (int)$mpcat['mp_id']; ?></td>
+                                <td><?php echo $mpcat['path']; ?></td>
+                                <td>
+                                    <span class="mp-sync-badge mp-cat-sync-only_mp">
+                                        <?php echo $this->language->get('text_mp_cat_status_only_mp'); ?>
+                                    </span>
+                                </td>
+                                <td>
+                                    <form method="post" action="<?php echo $apply_mp_categories_sync; ?>" style="display:inline;">
+                                        <input type="hidden" name="sync_action" value="delete" />
+                                        <input type="hidden" name="mp_category_id" value="<?php echo (int)$mpcat['mp_id']; ?>" />
+                                        <input type="submit" value="<?php echo $button_mp_force_delete; ?>" class="button" style="border-radius: .5em; color: beige; background-color: #003A88; margin: .5em;" />
+                                    </form>
                                 </td>
                             </tr>
                         <?php } } else { ?>
@@ -394,20 +461,17 @@
                 </table>
             </div>
             
-            
             <div id="tab-settings" class="tab-content">
-                
+                <!--
                 <div style="margin-top:10px; border-top:1px solid #ddd; padding-top:10px;">
                     <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/mpGetTaxonomies', 'token=' . $token, 'SSL'); ?>" class="button link">
-                        <?php echo $this->language->get('button_get_mp_taxononies'); ?>
+                        <?php echo $this->language->get('button_get_mp_taxonomies'); ?>
                     </a>
-                    <span class="help"><?php echo $this->language->get('text_get_mp_taxononies_help'); ?></span>
+                    <span class="help"><?php echo $this->language->get('text_get_mp_taxonomies_help'); ?></span>
                 </div>
-                
+                -->
                 <form method="post" action="<?php echo $this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $token, 'SSL'); ?>">
-                    
                     <input type="hidden" name="sdx_export_to_mp_sync_module" value="1" />
-                    
                     <table class="form">
                         <tr>
                             <td class="right"><?php echo $this->language->get('entry_api_url'); ?></td>
@@ -437,13 +501,8 @@
                             <td><input type="text" name="sdx_export_to_mp_sync_api[mp_feed_variants]" value="<?php echo isset($api['mp_feed_variants']) ? $api['mp_feed_variants'] : ''; ?>" style="width:320px;" /></td>
                         </tr>
                     </table>
-                    
-                    <p><input type="submit" class="button" value="<?php echo $this->language->get('button_save'); ?>" /></p>
-                    
-                    
-                    
+                    <p><input type="submit" value="<?php echo $this->language->get('button_save'); ?>" class="button" style="border-radius: .5em; color: beige; background-color: #003A88; margin: .5em;" /></p>
                 </form>
-                
             </div>
         
         </div>
@@ -479,7 +538,7 @@ $('#start-export').on('click', function() {
     $('#selected_json').val(JSON.stringify(selectedIds));
 
     // Show progress bar
-    $('#export-progress').show();
+    $('#export_progress').show();
     updateProgress(0);
 
     // For now: single AJAX request (later: batching)
@@ -504,7 +563,7 @@ $('#start-export').on('click', function() {
 
 // Progress update helper
 function updateProgress(percent) {
-    $('#progress-bar').css('width', percent + '%').text(percent + '%');
+    $('#progress_bar').css('width', percent + '%').text(percent + '%');
 }
 
 

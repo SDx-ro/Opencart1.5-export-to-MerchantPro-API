@@ -1,6 +1,6 @@
 <?php
 
-/* v1.4 EN language SDxExportToMPSync */
+/* v1.5 EN language SDxExportToMPSync */
 
 // Heading
 $_['heading_title']       = 'Export to MerchantPro and Sync';
@@ -40,7 +40,7 @@ $_['text_no_mp_feed']       = 'Consolidated Feed for MerchantPro Products is not
 $_['text_mp_feed_update']   = 'Update needed!';
 $_['text_mp_feed_updated']  = 'Consolidated Feed for MerchantPro Products was updated';
 
-$_['error_mp_feed_update']      = 'Failed updating the Consolidated Feed for MerchantPro Products.';
+$_['error_mp_feed_update']      = 'Failed updating the Consolidated Feed for MerchantPro Products. Check the API settings for Feeds! Possible other error(s)...';
 $_['error_no_file_specified']   = 'No file specified for download!';
 $_['error_invalid_file']        = 'Invalid file selected for download!';
 $_['error_file_not_found']      = 'The requested file could not be found!';
@@ -70,32 +70,48 @@ $_['error_permission']      = 'Warning: You do not have permission to modify thi
 $_['error_api_required']    = 'MerchantPro API URL (website), Key (user) and Secret (password) are required!';
 
 $_['text_json_prepared']    = '%s JSON with %d items -> %s';
-$_['error_json_prepare']    = 'Failed preparing JSON file.';
-$_['error_no_json_to_push'] = 'No JSON file found to push for this mode.';
-$_['text_push_done']        = 'Push %s: OK=%d, Fail=%d, Skipped=%d (file: %s)';
-$_['error_push_failed']     = 'Push failed.';
-$_['text_purged_files']     = 'Deleted %d MP export files from logs.';
+//$_['error_json_prepare']    = 'Failed preparing JSON file.';
+//$_['error_no_json_to_push'] = 'No JSON file found to push for this mode.';
+//$_['text_push_done']        = 'Push %s: OK=%d, Fail=%d, Skipped=%d (file: %s)';
+//$_['error_push_failed']     = 'Push failed.';
+//$_['text_purged_files']     = 'Deleted %d MP export files from logs.';
 
 // Category tab columns
-$_['col_mp_category']         = 'MP Categories';
-$_['col_mp_category_status']  = 'MP Sync status';
+$_['col_mp_categories']         = 'MP Categories';
+$_['col_mp_sync_status']  = 'MP Sync status';
+
+// MP sync actions
+$_['button_mp_force_patch']  = 'Force Update to MP (PATCH)';
+$_['button_mp_force_post']   = 'Force Add to MP (POST)';
+$_['button_mp_force_delete'] = 'Force DELETE from MP';
+
+// Extra category sync tab
+$_['tab_mp_categories_delete']        = 'MP Categories to Delete';
+$_['text_mp_categories_delete_info']  = 'MerchantPro categories that exist in MP but not in OpenCart (candidates for DELETE).';
+
+// Optional columns (if you want more specific headers)
+$_['col_mp_category_id']   = 'MP Category ID';
+$_['col_mp_category_path'] = 'MP Category';
+$_['col_action']           = 'Action';
 
 // Category sync status labels
 $_['text_mp_cat_status_ok']            = 'OK (in sync)';
-$_['text_mp_cat_status_only_oc']       = 'Only in OpenCart (to add -> POST)';
-$_['text_mp_cat_status_only_mp']       = 'Only in MerchantPro (to remove -> DELETE)';
-$_['text_mp_cat_status_patch_name']    = 'Name differs (to update -> PATCH)';
-$_['text_mp_cat_status_patch_parent']  = 'Parent differs (to update -> PATCH)';
-$_['text_mp_cat_status_patch_status']  = 'Status differs (to update -> PATCH)';
-$_['text_mp_cat_status_patch_complex'] = 'Name/Parent/Status differ (to update -> PATCH)';
+$_['text_mp_cat_status_only_oc']       = 'Only in OpenCart';
+$_['text_mp_cat_status_only_mp']       = 'Only in MerchantPro';
+$_['text_mp_cat_status_patch_name']    = 'Name differs';
+$_['text_mp_cat_status_patch_parent']  = 'Parent differs';
+$_['text_mp_cat_status_patch_status']  = 'Status differs';
+$_['text_mp_cat_status_patch_complex'] = 'Name/Parent/Status differ';
 
 // extra
 $_['text_categories_tab_info'] = 'Category listing.';
 
+$_['button_get_mp_products'] = 'Update MerchantPro Products';
+
 $_['button_get_mp_categories'] = 'Update MerchantPro Categories';
 
-$_['button_get_mp_taxononies'] = 'Get MerchantPro Taxonomies (taxes, measurement units, etc)';
+$_['button_get_mp_taxonomies'] = 'Get MerchantPro Taxonomies';
 
-$_['text_get_mp_taxononies_help'] = 'Get MerchantPro Taxonomies (taxes, measurement units, etc) via API <br> and store them in JSON files under system/logs/.';
+$_['text_get_mp_taxonomies_help'] = 'Get MerchantPro Taxonomies (taxes, measurement units, etc) via API <br> and store them in JSON files under system/logs/.';
 
 ?>
