@@ -27,3 +27,4 @@ error_log*
 
 # (Optional) Ignore PHPStorm/IntelliJ metadata
 .idea/
+admin/readme.txt
