@@ -197,8 +197,15 @@ class ModelToolSdxExportToMPSync extends Model {
         $local_feed_variants = DIR_LOGS . $store_slug . '_mp-export_feed-variants_' . date('Y-m-d') . '.xlsx';
         
         // download with cURL
-        $this->downloadFile($feed_simple, $local_feed_simple);
-        $this->downloadFile($feed_variants, $local_feed_variants);
+        try {
+            $this->downloadFile($feed_simple, $local_feed_simple);
+            $this->downloadFile($feed_variants, $local_feed_variants);
+        } catch (Exception $e) {
+            // Cleanup partial files before bailing out
+            if (is_file($local_feed_simple)) @unlink($local_feed_simple);
+            if (is_file($local_feed_variants)) @unlink($local_feed_variants);
+            return array('success' => false, 'error' => 'Failed downloading feeds: ' . $e->getMessage());
+        }
         
         // parse XLSX feeds
         try {
@@ -547,17 +554,52 @@ class ModelToolSdxExportToMPSync extends Model {
     
     // download and save file from URL (used to get the MP xlsx feeds for simple+variable and variants, but also for other downloads if needed)
     protected function downloadFile($url, $dest) {
-        $ch = curl_init($url);
         $fp = fopen($dest, 'w+');
+        if (!$fp) {
+            throw new Exception('Unable to open destination file for writing: ' . $dest);
+        }
+
+        $ch = curl_init($url);
+        if (!$ch) {
+            fclose($fp);
+            @unlink($dest);
+            throw new Exception('Unable to initialize cURL for URL: ' . $url);
+        }
+
         curl_setopt($ch, CURLOPT_FILE, $fp);
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 60); // 60s timeout
-        curl_exec($ch);
-        if (curl_errno($ch)) {
-            throw new Exception('Curl error: ' . curl_error($ch));
-        }
+        curl_setopt($ch, CURLOPT_FAILONERROR, false);
+        curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
+
+        $execResult = curl_exec($ch);
+        $errno      = curl_errno($ch);
+        $errstr     = curl_error($ch);
+        $status     = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $bytesWritten = ftell($fp);
+
         curl_close($ch);
         fclose($fp);
+
+        if ($errno) {
+            @unlink($dest);
+            throw new Exception('Curl error: ' . $errstr);
+        }
+
+        if ($execResult === false) {
+            @unlink($dest);
+            throw new Exception('Curl execution failed for URL: ' . $url);
+        }
+
+        if ($status < 200 || $status >= 300) {
+            @unlink($dest);
+            throw new Exception('Unexpected HTTP status ' . $status . ' when downloading ' . $url);
+        }
+
+        if ($bytesWritten === 0) {
+            @unlink($dest);
+            throw new Exception('Downloaded file is empty for URL: ' . $url);
+        }
     }
     
     // Get the latest MP xlsx files (consolidated and feeds with paths) or empty string

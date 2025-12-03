@@ -469,18 +469,31 @@ class ControllerToolSdxExportToMpSync extends Controller {
         $key  = isset($api['mp_api_key']) ? $api['mp_api_key'] : '';
         $sec  = isset($api['mp_api_secret']) ? $api['mp_api_secret'] : '';
         $store_slug = $this->model_tool_sdx_export_to_mp_sync->deriveStoreSlugFromUrl($base);
-        if ($base === '' || $key === '' || $sec === '') {
+        $valid = ($base !== '' && $key !== '' && $sec !== '');
+        if (!$valid && empty($this->session->data['error'])) {
             $this->session->data['error'] = $this->language->get('error_api_required');
             //$this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
             //$this->redirect($this->url->link('tool/sdx_export_to_mp_sync/apierror', 'token=' . $this->session->data['token'], 'SSL'));
             //exit;
         }
-        return array('base'=>$base, 'key'=>$key, 'secret'=>$sec, 'store_slug' => $store_slug);
+        return array('base'=>$base, 'key'=>$key, 'secret'=>$sec, 'store_slug' => $store_slug, 'valid' => $valid);
     }
     
     // the MP API request
     private function mpRequest($method, $pathOrUrl, $query = array(), $body = null, $maxRetries = 4) {
         $set = $this->mpApiSettings();
+
+        if (empty($set['valid'])) {
+            if (empty($this->session->data['error'])) {
+                $this->session->data['error'] = $this->language->get('error_api_required');
+            }
+            return array(
+                'status'  => 0,
+                'headers' => array(),
+                'json'    => null,
+                'error'   => $this->language->get('error_api_required')
+            );
+        }
         
         // Build URL
         $url = (strpos($pathOrUrl, 'http') === 0) ? $pathOrUrl : $set['base'] . $pathOrUrl;
@@ -780,7 +793,18 @@ class ControllerToolSdxExportToMpSync extends Controller {
     // === MP API: get ALL products (with pagination) + optional JSON cache ===
     private function mpGetAllProducts($writeFile = true) {
         $set = $this->mpApiSettings();
-        
+
+        if (empty($set['valid'])) {
+            return array(
+                'success'      => false,
+                'error'        => $this->language->get('error_api_required'),
+                'mp_prodcache' => null,
+                'mp_products'  => array(),
+                'meta'         => array(),
+                'source'       => ''
+            );
+        }
+
         // Cache path -> find latest json cache file (pattern)
         //$cachepattern = DIR_LOGS . $set['store_slug'] . '_mp-export_all-products-cache_*.json';
         $cachepattern = DIR_LOGS . $set['store_slug'] . '_mp-export_api-products-cache_*.json';
