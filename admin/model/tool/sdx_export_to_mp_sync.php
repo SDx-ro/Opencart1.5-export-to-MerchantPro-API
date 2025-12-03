@@ -201,7 +201,11 @@ class ModelToolSdxExportToMPSync extends Model {
             $this->downloadFile($feed_simple, $local_feed_simple);
             $this->downloadFile($feed_variants, $local_feed_variants);
         } catch (Exception $e) {
-            // Cleanup partial files before bailing out
+            // Cleanup partial files (temp or current) before bailing out
+            $simple_tmp   = $local_feed_simple . '.tmp';
+            $variants_tmp = $local_feed_variants . '.tmp';
+            if (is_file($simple_tmp)) @unlink($simple_tmp);
+            if (is_file($variants_tmp)) @unlink($variants_tmp);
             if (is_file($local_feed_simple)) @unlink($local_feed_simple);
             if (is_file($local_feed_variants)) @unlink($local_feed_variants);
             return array('success' => false, 'error' => 'Failed downloading feeds: ' . $e->getMessage());
@@ -554,15 +558,16 @@ class ModelToolSdxExportToMPSync extends Model {
     
     // download and save file from URL (used to get the MP xlsx feeds for simple+variable and variants, but also for other downloads if needed)
     protected function downloadFile($url, $dest) {
-        $fp = fopen($dest, 'w+');
+        $tmpDest = $dest . '.tmp';
+        $fp = fopen($tmpDest, 'w+');
         if (!$fp) {
-            throw new Exception('Unable to open destination file for writing: ' . $dest);
+            throw new Exception('Unable to open destination file for writing: ' . $tmpDest);
         }
 
         $ch = curl_init($url);
         if (!$ch) {
             fclose($fp);
-            @unlink($dest);
+            @unlink($tmpDest);
             throw new Exception('Unable to initialize cURL for URL: ' . $url);
         }
 
@@ -576,29 +581,35 @@ class ModelToolSdxExportToMPSync extends Model {
         $errno      = curl_errno($ch);
         $errstr     = curl_error($ch);
         $status     = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $bytesWritten = ftell($fp);
 
         curl_close($ch);
+        fflush($fp);
+        $bytesWritten = ftell($fp);
         fclose($fp);
 
         if ($errno) {
-            @unlink($dest);
+            @unlink($tmpDest);
             throw new Exception('Curl error: ' . $errstr);
         }
 
         if ($execResult === false) {
-            @unlink($dest);
+            @unlink($tmpDest);
             throw new Exception('Curl execution failed for URL: ' . $url);
         }
 
         if ($status < 200 || $status >= 300) {
-            @unlink($dest);
+            @unlink($tmpDest);
             throw new Exception('Unexpected HTTP status ' . $status . ' when downloading ' . $url);
         }
 
         if ($bytesWritten === 0) {
-            @unlink($dest);
+            @unlink($tmpDest);
             throw new Exception('Downloaded file is empty for URL: ' . $url);
+        }
+
+        if (!@rename($tmpDest, $dest)) {
+            @unlink($tmpDest);
+            throw new Exception('Unable to move downloaded file into place: ' . $dest);
         }
     }
     
