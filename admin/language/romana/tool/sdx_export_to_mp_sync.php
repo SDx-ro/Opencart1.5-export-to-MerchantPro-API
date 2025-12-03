@@ -30,20 +30,25 @@ $_['entry_api_key']             = 'API Key:';
 $_['entry_api_secret']          = 'API Secret:';
 $_['entry_feed_simple']         = 'Feed Simplu MP<br> (produse simple/variabile)';
 $_['entry_feed_variants']       = 'Feed Variatiuni MP<br> (variatiuni/variante produs)';
+
 $_['button_save']               = 'Salveaza';
 $_['button_export']             = 'Export';
 
-// Strings for MP feed update
 $_['button_update_mp_feed'] = 'Actualizare Produse MerchantPro (Feed Consolidat)';
+
 $_['text_current_mp_feed']  = 'Produse MerchantPro (Feed Consolidat)';
 $_['text_no_mp_feed']       = 'NU este disponibil Feed-ul Consolidat pentru Produse MerchantPro! <br> Click <b>'.$_['button_update_mp_feed'].'</b> <br> pentru a descarca si consolida feed-urile.';
-$_['text_mp_feed_update']   = 'Actualizare necesara!';
 $_['text_mp_feed_updated']  = 'S-a actualizat Feed-ul Consolidat pentru Produse MerchantPro';
+
+$_['text_mp_update_needed'] = 'Actualizare necesara!';
 
 $_['error_mp_feed_update']      = 'A esuat actualizarea Feed-ului Consolidat pentru Produse MerchantPro. Verifica setarile API pentru Feed-uri! Pot fi si alte erori...';
 $_['error_no_file_specified']   = 'Nici un fisier specificat pentru descarcare!';
 $_['error_invalid_file']        = 'Fisier invalid selectat pentru descarcare!';
 $_['error_file_not_found']      = 'Fisierul solicitat nu poate fi gasit!';
+
+$_['error_mp_categories_api']   = 'Nu s-au preluat categoriile MerchantPro via API sau fisier local (cache).';
+$_['error_mp_products_api']     = 'Nu s-au preluat produsele MerchantPro via API sau fisier local (cache).';
 
 // Columns (labels)
 $_['col_product']       = 'Produs';
@@ -110,7 +115,7 @@ $_['button_get_mp_products'] = 'Actualizare Produse MerchantPro';
 
 $_['button_get_mp_categories'] = 'Actualizare Categorii MerchantPro';
 
-$_['button_get_mp_taxonomies'] = 'Actualizeaza Taxonomii MerchantPro';
+$_['button_get_mp_taxonomies'] = 'Actualizare Taxonomii MerchantPro';
 
 $_['text_get_mp_taxonomies_help'] = 'Preia Taxonomii MerchantPro (taxe, unitati de masura, etc) via API <br> si salveaza-le in fisiere JSON in system/logs/.';
 

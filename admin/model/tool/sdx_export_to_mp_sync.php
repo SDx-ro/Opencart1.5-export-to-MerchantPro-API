@@ -1087,7 +1087,7 @@ class ModelToolSdxExportToMPSync extends Model {
         return array('success' => true, 'cachefile' => $cachefile, 'map' => $map, 'mp_extra'  => $mp_extra, 'meta' => $cache['meta']);
     }
     
-    // check OC products against MP products // compare prices, stock, model vs sku, model_base vs sku_base, names
+    // check OC products against MP feed products // compare prices, stock, model vs sku, model_base vs sku_base, names
     public function checkOCagainstMP($filter = array(), $force_rebuild_cache = false) {
         
         // initialize the output
@@ -1396,660 +1396,1101 @@ class ModelToolSdxExportToMPSync extends Model {
         
     }
     
-    /* === start of get Product details for MerchantPro API actions === */
-
-// Build a minimal OC product row for MP sync. // used for getProductDetailsForMP(). 
-// @param int $product_id * @return array|null
-public function getOcProductRowForMp($product_id) {
-    $product_id  = (int)$product_id;
-    $language_id = (int)$this->config->get('config_language_id');
-    
-    // Base product data
-    $sql = "SELECT p.product_id, p.model, p.price, p.quantity, p.status, pd.name
-            FROM `" . DB_PREFIX . "product` p
-                LEFT JOIN `" . DB_PREFIX . "product_description` pd ON (p.product_id = pd.product_id)
-            WHERE p.product_id = '" . $product_id . "'
-                AND pd.language_id = '" . $language_id . "' ";
-    
-    $q = $this->db->query($sql);
-    if (!$q->num_rows) {
-        return null;
-    }
-    
-    $row = $q->row;
-    
-    // Lowest active special price if any
-    $lowest_special = $this->getProductLowestSpecial($product_id);
-    $lowest_special = !empty($lowest_special) ? $lowest_special : 0.0; 
-    
-    // Detect product_type:
-    // If product has select options, treat as 'variable', else 'simple'
-    $opt_q = $this->db->query("
-        SELECT po.product_option_id, o.type
-        FROM `" . DB_PREFIX . "product_option` po
-            LEFT JOIN `" . DB_PREFIX . "option` o ON (po.option_id = o.option_id)
-        WHERE po.product_id = '" . $product_id . "'
-    ");
-    
-    $has_select = false;
-    foreach ($opt_q->rows as $opt) {
-        if (!empty($opt['type']) && $opt['type'] == 'select') {
-            $has_select = true;
-            break;
-        }
-    }
-    
-    $product_type = $has_select ? 'variable' : 'simple';
-    //$product_type = empty($this->getProductSelectOptions($product_id)) ? 'simple' : 'variable';
-    
-    $mp_id = null;
-    // get MP products from cache or build that cache
-    $mp_cache = $this->getConsolidatedMPcache();
-    $mp_products = isset($mp_cache['map']) ? $mp_cache['map'] : array();
-    if( isset($mp_products[$product_id]) ) {
-        $mp_id = $mp_products[$product_id]['mp_id'];
-    }
-
-    $ocproduct = array(
-        'product_type'    => $product_type,          // simple / variable
-        'product_id'      => $product_id,
-        'product_id_base' => $product_id,           // for compatibility with your earlier code
-        'mp_id'           => $mp_id,                // null => POST, >0 => PATCH
-        'model'           => $row['model'],
-        'ext_ref'         => $product_id,
-        'name'            => $row['name'],
-        'price'           => (float)$row['price'],
-        'lowest_special'  => $lowest_special,
-        'quantity'        => (float)$row['quantity'],
-    );
-
-    return $ocproduct;
-}
-
-// Build product details suitable for MP API POST/PATCH.
-// @param array $ocproduct -> Row from your OC products list (must contain at least product_type, product_id, product_id_base, mp_id, model, model_base, ext_ref, name, price, lowest_special, quantity).
-public function getProductDetailsForMP($ocproduct) {
-    $language_id = (int)$this->config->get('config_language_id');
-    
-    $error = '';
-    
-    // --- Decide MP product type based on OC product_type ---
-    if (!isset($ocproduct['product_type'])) {
-        return array(
-            'success'               => false,
-            'error'                 => 'Missing OC product_type',
-            'product'               => array(),
-            'missing_categories'    => array()
-        );
-    }
-    
-    if ($ocproduct['product_type'] === 'simple') {
-        $mp_type = 'basic';
-    } elseif ($ocproduct['product_type'] === 'variable') {
-        $mp_type = 'multi_variant';
-    } else {
-        // We do not support other OC "types" (variant-only rows, undefined, etc.)
-        return array(
-            'success'               => false,
-            'error'                 => 'Cannot use variant or undefined product type (' . $ocproduct['product_type'] . ')',
-            'product'               => array(),
-            'missing_categories'    => array()
-        );
-    }
-    
-    // Base OC product id (the main product, not variant suffix)
-    $product_id = isset($ocproduct['product_id_base'])
-        ? (int)$ocproduct['product_id_base']
-        : (int)$ocproduct['product_id'];
-
-    // --- Load main product + description (with your extra columns) ---
-    $pdsql = $this->db->query("
-        SELECT p.*, pd.*
-        FROM `" . DB_PREFIX . "product` p
-        LEFT JOIN `" . DB_PREFIX . "product_description` pd
-            ON (p.product_id = pd.product_id)
-        WHERE pd.language_id = '" . $language_id . "'
-          AND p.product_id    = '" . (int)$product_id . "'
-    ")->row;
-    
-    if (!$pdsql) {
-        return array(
-            'success'               => false,
-            'error'                 => 'OC product not found (ID ' . (int)$product_id . ')',
-            'product'               => array(),
-            'missing_categories'    => array()
-        );
-    }
-    
-    // --- Load attributes and build HTML table (your existing helper) ---
-    $pasql = $this->db->query("
-        SELECT pa.attribute_id, ad.name, pa.text, pa.filterseo
-        FROM " . DB_PREFIX . "product_attribute pa
-        LEFT JOIN " . DB_PREFIX . "attribute_description ad
-               ON (pa.attribute_id = ad.attribute_id
-               AND ad.language_id = '" . $language_id . "')
-        WHERE pa.product_id = '" . (int)$product_id . "'
-    ")->rows;
-    
-    $pattrtable = $this->buildAttributesHtmlTable($pasql);
-    
-    // --- Build full HTML description (OC -> MP) ---
-    $description_parts = array();
-    
-    if (!empty($pdsql['description'])) {
-        $description_parts[] = $this->cleanhtml($pdsql['description']);
-    }
-    if (!empty($pattrtable)) {
-        $description_parts[] = $pattrtable;
-    }
-    if (!empty($pdsql['specificatii'])) {
-        $description_parts[] = $this->cleanhtml($pdsql['specificatii']);
-    }
-    if (!empty($pdsql['aplicatii'])) {
-        $description_parts[] = $this->cleanhtml($pdsql['aplicatii']);
-    }
-    
-    $description = '';
-    if (!empty($description_parts)) {
-        $description = implode('<hr>', $description_parts);
-    }
-    
-    // --- Meta fields ---
-    $meta_title = isset($ocproduct['name']) ? $ocproduct['name'] : $pdsql['name'];
-    
-    if (!empty($pdsql['meta_description'])) {
-        $meta_description = $this->cleantxt($pdsql['meta_description']);
-    } elseif (!empty($pattrtable)) {
-        $meta_description = $this->cleantxt($pattrtable);
-    } else {
-        $meta_description = '';
-    }
-    
-    // --- Identity (sku, ext_ref) ---
-    $sku = isset($ocproduct['model']) ? $ocproduct['model'] : (isset($pdsql['model']) ? $pdsql['model'] : '');
-    $ext_ref = isset($ocproduct['ext_ref']) ? $ocproduct['ext_ref'] : $product_id;
-    
-    if ($sku === '') {
-        $error .= ($error ? ' / ' : '') . 'OC product model is empty';
-    }
-    if ($ext_ref === '' || $ext_ref === null) {
-        $ext_ref = $product_id;
-    }
-    if (empty($ocproduct['name']) && empty($pdsql['name'])) {
-        $error .= ($error ? ' / ' : '') . 'OC product name is empty';
-    }
-    
-    $product_name = isset($ocproduct['name']) ? $ocproduct['name'] : $pdsql['name'];
-    
-    // --- TAX: read TVA from MP cached taxonomy JSON ---
-    $mpTax = $this->getMpTvaFromCache();
-    $mp_tva_value = isset($mpTax['value']) ? (float)$mpTax['value'] : 21.0; // 0.0 or 21.0 as fallback for Romania 2025
-    if ($mp_tva_value <= 0) {
-        // Fallback TVA (adjust if your MP shop uses another value)
-        $mp_tva_value = 21.0;
-    }
-    
-    // --- Base prices (gross/net) ---
-    $price_source_gross = 0.0;
-    if (isset($ocproduct['lowest_special']) && (float)$ocproduct['lowest_special'] > 0) {
-        // promo price
-        $price_source_gross = (float)$ocproduct['lowest_special'];
-    } else {
-        $price_source_gross = isset($ocproduct['price']) ? (float)$ocproduct['price'] : (float)$pdsql['price'];
-    }
-    
-    $price_gross = $price_source_gross;
-    $price_net   = ($price_gross > 0)
-        ? round($price_gross / (1 + $mp_tva_value / 100), 4)
-        : 0.0;
-    
-    $old_price_gross = '';
-    $old_price_net   = '';
-    
-    if (isset($ocproduct['lowest_special']) && (float)$ocproduct['lowest_special'] > 0) {
-        // oc price is "old" price
-        $old_price_gross = isset($ocproduct['price']) ? (float)$ocproduct['price'] : (float)$pdsql['price'];
-        $old_price_net   = round($old_price_gross / (1 + $mp_tva_value / 100), 4);
-    }
-    
-    // --- Optional cost (if you have a cost column) ---
-    $pcost_gross = isset($pdsql['cost']) ? (float)$pdsql['cost'] : 0.0;
-    $cost_gross  = $pcost_gross > 0 ? $pcost_gross : null;
-    $cost_net    = ($cost_gross !== null && $cost_gross > 0)
-        ? round($cost_gross / (1 + $mp_tva_value / 100), 4)
-        : null;
-    
-    // --- Stock & inventory ---
-    $quantity = isset($ocproduct['quantity'])
-        ? (float)$ocproduct['quantity']
-        : (isset($pdsql['quantity']) ? (float)$pdsql['quantity'] : 0.0);
-
-    $inventory_enabled = 'on'; // on/off as per MP docs
-    $allow_backorders  = true;
-    
-    // --- Weight (assuming already normalized to kg elsewhere) ---
-    $weight = isset($pdsql['weight']) ? (float)$pdsql['weight'] : 0.0;
-    
-    // --- Quantity multiplier ---
-    $qty_multiplier = 1;
-    if (!empty($pdsql['minimum']) && (int)$pdsql['minimum'] > 1) {
-        $qty_multiplier = (int)$pdsql['minimum'];
-    } elseif (!empty($pdsql['name']) && stripos($pdsql['name'], 'banda led') !== false) {
-        $qty_multiplier = 5;
-    }
-    
-    // --- Categories: map OC category_ids -> MP category_id + categories[] ---
-    $oc_categories = array();
-    $qCats = $this->db->query("
-        SELECT category_id
-        FROM `" . DB_PREFIX . "product_to_category`
-        WHERE product_id = '" . (int)$product_id . "'
-    ");
-    foreach ($qCats->rows as $r) {
-        $oc_categories[] = (int)$r['category_id'];
-    }
-    
-    $ocToMpCat   = $this->getOcToMpCategoryMapFromJson();
-    $mpCatNames  = $this->getMpCategoryNameMapFromCache();
-    
-    $categories            = array();
-    $primary_category_id   = 0;
-    $missing_categories    = array();
-    
-    foreach ($oc_categories as $cid) {
-        if (isset($ocToMpCat[$cid])) {
-            $mp_id = (int)$ocToMpCat[$cid];
-            if (!$primary_category_id) {
-                $primary_category_id = $mp_id;
+    public function checkOCagainstMPapi($filter = array()) {
+        
+        ///$store_slug = $this->getStoreSlug(); // however you currently build it
+        
+        // get the store_slug from mp cache
+        //isset($mp_cache['meta']['store_slug']) ? $store_slug = $mp_cache['meta']['store_slug'] : $store_slug = '';
+        // alternate way to get store_slug if mp cache not available
+        //if($store_slug == '') {
+            // load settings & derive store slug
+            $this->load->model('setting/setting');
+            $settings = $this->model_setting_setting->getSetting('sdx_export_to_mp_sync');
+            $api = isset($settings['sdx_export_to_mp_sync_api']) ? $settings['sdx_export_to_mp_sync_api'] : array();
+            $store_slug = $this->deriveStoreSlugFromApi($api);
+            if (!$store_slug) {
+                return array('success' => false, 'error' => 'store_slug_not_found', 'oc' => array()); // return empty array but notify about store-slug error
             }
-            $cat = array('id' => $mp_id);
-            if (isset($mpCatNames[$mp_id])) {
-                $cat['name'] = $mpCatNames[$mp_id];
+        //}
+        
+        // Load helper models
+        $this->load->model('catalog/product');
+        $this->load->model('localisation/stock_status');
+        
+        // normalization helper
+        $normalizeStr = function($s) {
+            $s = trim((string)$s);
+            if ($s === '') return '';
+            if (function_exists('iconv')) {
+                $t = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $s);
+                if ($t !== false) $s = $t;
             }
-            $categories[] = $cat;
-        } else {
-            // Keep track of OC categories which are not yet mapped to MP
-            $missing_categories[] = $cid;
+            $s = mb_strtolower($s, 'UTF-8');
+            $s = preg_replace('/\s+/', ' ', $s);
+            // remove space to tighten the comparison...
+            //$s = preg_replace('/\s+/', '', $s);
+            $s = preg_replace('/[^\p{L}\p{N}\s\-]/u', '', $s);
+            $s = trim($s);
+            return $s;
+        };
+        
+        // 1. Load API products cache
+        $cache_info = $this->loadMpApiProductsCache($store_slug, 24); // 24h TTL, for example
+        $api_cache = $cache_info['data'];
+        $api_cache_file = $cache_info['file'];
+        $api_cache_stale = $cache_info['stale'];
+        
+        if (empty($api_cache)) {
+            // No API cache -> set error for UI
+            if(isset($this->session->data['error'])){
+                $this->session->data['error'] .= '<br>'.$this->language->get('error_mp_products_api'); // add error details if available .(isset($cache_info['error']) ? '<br>'.$cache_info['error'] : '')
+            } else {
+                $this->session->data['error'] = $this->language->get('error_mp_products_api');
+            }
+            
+            // No API cache -> fallback to XLSX-based version
+            return $this->checkOCagainstMP($filter);
         }
-    }
-    
-    // --- Base MP product payload (no variants yet) ---
-    $product = array(
-        // For PATCH, MP expects id here. For POST, omit or keep null.
-        'id'               => isset($ocproduct['mp_id']) && $ocproduct['mp_id']
-                                ? (int)$ocproduct['mp_id']
-                                : null,
         
-        'type'             => $mp_type,
+        // You could also decide to fallback when $cache_info['stale'] == true
         
-        'sku'              => $sku,
-        'ext_ref'          => $ext_ref,
-        'name'             => $product_name,
-        'description'      => $description,
-        'meta_title'       => $meta_title,
-        'meta_description' => $meta_description,
+        // 2. Build index by ext_ref
+        //$mpByExtRef = $this->buildMpIndexFromApiCache($api_cache);
+        $mp_products = $this->buildMpIndexFromApiCache($api_cache);
+        $mpByExtRef = $mp_products['mp_extref'];
         
-        'inventory_enabled' => $inventory_enabled,
-        'stock'             => $quantity,
-        'stock_reserved'    => 0,
-        'allow_backorders'  => $allow_backorders,
+        // 3. Build MP delete by MP ID
+        //$mp_delete = $this->buildMpDeleteFromApiCache($api_cache);
+        $mp_delete = $mp_products['mp_delete'];
         
-        'price_net'         => $price_net,
-        'price_gross'       => $price_gross,
-        'old_price_net'     => $old_price_net,
-        'old_price_gross'   => $old_price_gross,
-        
-        'cost_net'          => $cost_net,
-        'cost_gross'        => $cost_gross,
-        
-        'tax_id'            => isset($mpTax['id']) ? (int)$mpTax['id'] : null,
-        'tax_value'         => $mp_tva_value,
-        'tax_name'          => isset($mpTax['name']) ? $mpTax['name'] : null,
-        
-        'quantity_multiplier' => $qty_multiplier,
-        'weight'              => $weight,
-        
-        'category_id'        => $primary_category_id ?: null,
-        'category_name'      => $primary_category_id && isset($mpCatNames[$primary_category_id])
-                                ? $mpCatNames[$primary_category_id]
-                                : null,
-        'categories'         => $categories,
-    );
-    
-    // --- Multi-variant product: build variant_attributes + variants from OC options ---
-    if ($mp_type === 'multi_variant') {
-        $select_options = $this->getProductSelectOptions($product_id);
-        
-        if (!empty($select_options)) {
-            $variant_data = $this->buildMpVariantsFromOcOptions(
-                $ocproduct,
-                $select_options,
-                $mpTax,
-                $price_net,
-                $price_gross
-            );
-            $product['variant_attributes'] = $variant_data['variant_attributes'];
-            $product['variants']           = $variant_data['variants'];
-        } else {
-            // If OC says "variable" but there are no select options, fall back to basic
-            $product['type'] = 'basic';
+        // 4. Load OC products (same as in checkOCagainstMP)
+        //$oc_products = $this->getProductsForMpCheck($filter);
+        // get OC products
+        $oc_products = $this->getProductsForMP($filter);
+        // return empty array if no OC products
+        if(empty($oc_products)) {
+            return array('success' => false, 'error' => 'Error loading OC products', 'file' => $api_cache_file, 'stale' => $api_cache_stale, 'oc' => array());
         }
-    }
-    
-    // success is true only if we do not have hard errors and all OC categories are mapped
-    $success = ($error === '' && empty($missing_categories));
-    
-    return array(
-        'success'            => $success,
-        'error'              => $error,
-        'product'            => $product,            // MP-ready payload
-        'missing_categories' => $missing_categories, // list of OC category_ids that have no MP mapping
-    );
-}
-
-// Read TVA tax from cached taxonomy JSON (*_mp-export_taxes-cache_*.json)
-public function getMpTvaFromCache() {
-    
-    $storeslug = $this->getMpStoreSlugFromSettings();
-    //$cache = array('id' => null, 'value' => 0.0, 'name' => '', 'file' => null);
-    $cache = array('id' => 1, 'value' => 21.0, 'name' => 'TVA', 'file' => null); // fallback for Romania as 2025
-    if ($storeslug === '') {
-        return $cache;
-    }
-    
-    $pattern = DIR_LOGS . $storeslug . '_mp-export_taxes-cache_*.json';
-    $files   = glob($pattern);
-    if (!$files) {
-        return $cache;
-    }
-    usort($files, function($a, $b) {
-        return filemtime($b) - filemtime($a);
-    });
-    $file = $files[0];
-    $raw  = @file_get_contents($file);
-    if ($raw === false) {
-        return $cache;
-    }
-    $json = json_decode($raw, true);
-    if (!is_array($json)) {
-        return $cache;
-    }
-    // Try to locate list of taxes
-    $rows = array();
-    if (isset($json['json']) && is_array($json['json']) ) {
-        $rows = $json['json'];
-    }
-    if (!$rows) {
-        return $cache;
-    }
-    
-    $candidates = array();
-    foreach ($rows as $t) {
-        if (!is_array($t)) continue;
         
-        $id   = isset($t['id'])    ? (int)$t['id']    : 0;
-        $name = isset($t['name'])  ? trim($t['name']) : '';
-        $val  = isset($t['value']) ? (float)$t['value'] : null;
+        $out = array();
         
-        if ($id <= 0 || $name === '' || $val === null) continue;
-        
-        $row = array('id' => $id, 'value' => $val, 'name' => $name, 'file' => $file);
-        
-        $lname = strtolower($name);
-        if (strpos($lname, 'tva') !== false || strpos($lname, 'vat') !== false) {
-            $candidates[] = $row;
+        foreach ($oc_products as $oc_product) {
+            $ext_ref = $oc_product['ext_ref'];
+            
+            $oc_product_id = (int)$oc_product['product_id_base'];
+                
+            $pslug = $this->db->query("SELECT `keyword` FROM `" . DB_PREFIX . "url_alias` WHERE query = 'product_id=" . $oc_product_id . "' ")->row;
+            $pkeyword = isset($pslug['keyword']) ? $pslug['keyword'] : '';
+            $oc_product['product_slug'] = ($pkeyword ? $pkeyword : '');
+            $oc_product['view_product'] = ($pkeyword ? HTTPS_CATALOG.$pkeyword : $this->url->link('product/product', 'product_id=' . $oc_product_id, 'SSL'));
+            $oc_product['edit_product'] = $this->url->link('catalog/product/update', 'token=' . $this->session->data['token'] . '&product_id=' . $oc_product_id, 'SSL');
+            
+            // Stock status text
+            $stock_status_text = '';
+            if ($oc_product['stock_status_id']) {
+                $ss = $this->model_localisation_stock_status->getStockStatus( (int)$oc_product['stock_status_id'] );
+                if ($ss && isset($ss['name'])) $stock_status_text = $ss['name'];
+            }
+            $oc_product['stock_status_text'] = $stock_status_text;
+            
+            $oc_product['specials'] = $this->model_catalog_product->getProductSpecials($oc_product_id);
+            
+            if (isset($mpByExtRef[$ext_ref])) {
+                // Product exists in MP (by ext_ref)
+                $mp_product = $mpByExtRef[$ext_ref];
+                
+                // main sync states
+                $mp_sync_status_code = 'in_mp';
+                $mp_sync_status = $this->language->get('mp_status_in_mp');
+                $mp_matched_by = 'oc_ext_ref';
+                $mp_sync_issues = '';
+                
+                // set mp_sync_status_code + mp_sync_status + mp_matched_by + mp_sync_issues // comparing OC vs $mp_product from API.
+                
+                // Effective OC price: lowest of special vs regular
+                $oc_effective = null;
+                if (!empty($oc_product['lowest_special'])) {
+                    $oc_effective = $oc_product['lowest_special'];
+                } elseif (!empty($oc_product['price'])) {
+                    $oc_effective = $oc_product['price'];
+                }
+                // Effective MP price: lowest of current vs old
+                $mp_effective = null;
+                if (isset($mp_product['price_gross']) && $mp_product['price_gross'] !== null) {
+                    $mp_effective = (float)$mp_product['price_gross'];
+                } elseif (isset($mp_product['old_price_gross']) && $mp_product['old_price_gross'] !== null) {
+                    $mp_effective = (float)$mp_product['old_price_gross'];
+                }
+                // Price compare: OC effective vs MP effective 
+                if ($oc_effective !== null && $mp_effective !== null && abs($mp_effective - $oc_effective) > 0.01) {
+                    $mp_sync_status_code = 'price_stock_diff';
+                    $mp_sync_status = $this->language->get('mp_status_price_stock_diff');
+                    $mp_sync_issues .= 'mismatch oc_price '.$oc_effective.' vs. mp_price '.$mp_effective.' <br>';
+                }
+                // Stock
+                if ($oc_product['quantity'] !== null && isset($mp_product['stock']) && $mp_product['stock'] !== null) {
+                    if ((int)$oc_product['quantity'] !== (int)$mp_product['stock']) {
+                        $mp_sync_status_code = 'price_stock_diff';
+                        $mp_sync_status = $this->language->get('mp_status_price_stock_diff');
+                        $mp_sync_issues .= 'mismatch oc_stock '.$oc_product['quantity'].' vs. mp_stock '.$mp_product['stock'].' <br>';
+                    }
+                }
+                
+                // Compare OC ext_ref vs. MP ext_ref 
+                if (isset($mp_product['ext_ref'])) {
+                    if ($mp_product['ext_ref'] !== '' && $normalizeStr($oc_product['ext_ref']) !== $normalizeStr($mp_product['ext_ref'])) {
+                        $mp_sync_status_code = 'out_of_sync';
+                        $mp_sync_status = $this->language->get('mp_status_out_of_sync');
+                        $mp_sync_issues .= 'mp_ext_ref_mismatch: '.$mp_product['ext_ref'].' <br>';
+                    }
+                }
+                
+                // Compare OC Model vs. MP SKU (basic, multi-variant, variant)
+                if (isset($mp_product['sku'])) {
+                    if ($mp_product['sku'] !== '' && $normalizeStr($oc_product['model']) !== $normalizeStr($mp_product['sku'])) {
+                        $mp_sync_status_code = 'out_of_sync';
+                        $mp_sync_status = $this->language->get('mp_status_out_of_sync');
+                        $mp_sync_issues .= 'mp_sku_mismatch: '.$mp_product['sku'].' <br>';
+                    }
+                }
+                elseif(empty($mp_product['sku'])){
+                    $mp_sync_status_code = 'out_of_sync';
+                    $mp_sync_status = $this->language->get('mp_status_out_of_sync');
+                    $mp_sync_issues .= 'mp_sku_missing: update needed <br>';
+                }
+                
+                // Compare OC Model vs. SKU (variant)
+                //if (isset($mp_product['variants']['sku'])) {
+                //    if ($mp_product['variants']['sku'] !== '' && $normalizeStr($oc_product['model']) !== $normalizeStr($mp_product['variants']['sku'])) {
+                //        $mp_sync_status_code = 'out_of_sync';
+                //        $mp_sync_status = $this->language->get('mp_status_out_of_sync');
+                //        $mp_sync_issues .= 'mp_variant_sku_mismatch: '.$mp_product['variants']['sku'].' <br>';
+                //    }
+                //}
+                
+                // Check OC ID (variant) vs. ext_ref (variant) // not the case as $mpByExtRef/$mp_product are only basic or multi-variant, no variants
+                //if (isset($mp_product['variants']['sku'])) {
+                //    if ($mp_product['variants']['sku'] !== '' && $normalizeStr($oc_product['model']) !== $normalizeStr($mp_product['variants']['sku'])) {
+                //        $mp_sync_status_code = 'out_of_sync';
+                //        $mp_sync_status = $this->language->get('mp_status_out_of_sync');
+                //        $mp_sync_issues .= 'mp_variant_sku_mismatch: '.$mp_product['variants']['sku'].' <br>';
+                //    }
+                //}
+                
+                // Check OC ID vs. ext_ref // not the case as $mpByExtRef/$mp_product are already matched by ext_ref
+                //if (isset($mp_product['ext_ref'])) {
+                //    if ($mp_product['ext_ref'] !== '' && $normalizeStr($oc_product['model']) !== $normalizeStr($mp_product['ext_ref'])) {
+                //        $mp_sync_status_code = 'out_of_sync';
+                //        $mp_sync_status = $this->language->get('mp_status_out_of_sync');
+                //        $mp_sync_issues .= 'mp_ext_ref_mismatch: '.$mp_product['ext_ref'].' <br>';
+                //    }
+                //}
+                
+                // Compare name (basic normalization)
+                if (isset($mp_product['name'])) {
+                    if ($normalizeStr($oc_product['name']) !== $normalizeStr($mp_product['name'])) {
+                        $mp_sync_status_code = 'out_of_sync';
+                        $mp_sync_status = $this->language->get('mp_status_out_of_sync');
+                        $mp_sync_issues .= 'mp_name_mismatch: '.$mp_product['name'].' <br>';
+                    }
+                }
+                
+                $oc_product['mp_id'] = $mp_product['id'];
+                
+                $oc_product['mp_sync_status_code']  = $mp_sync_status_code;
+                $oc_product['mp_sync_status']       = $mp_sync_status;
+                $oc_product['mp_matched_by']        = $mp_matched_by;
+                $oc_product['mp_sync_issues']       = $mp_sync_issues; // computed issues
+                
+            } else {
+                /* // Check OC variant vs. MP variant
+                if (isset($mpByExtRef[$oc_product_id]) && isset($mpByExtRef[$oc_product_id]['variants'])) {
+                    
+                    $mp_variants = $mpByExtRef[$oc_product_id]['variants'];
+                    
+                    foreach($mp_variants as $mp_variant) {
+                    
+                        //if ($mp_variant['sku'] !== '' && $normalizeStr($oc_product['model']) !== $normalizeStr($mp_variant['sku'])) {
+                        //    $oc_product['mp_id'] = $mp_variant['id'];
+                        //    $oc_product['mp_sync_status_code'] = 'out_of_sync';
+                        //    $oc_product['mp_sync_status'] = $this->language->get('mp_status_out_of_sync');
+                        //    $oc_product['mp_sync_issues'] = 'mp_variant_sku_mismatch: '.$mp_variant['sku'].' <br>';
+                        //    $oc_product['mp_matched_by'] = 'oc_variant_and_product_id';
+                        //}
+                        
+                        if ($mp_variant['sku'] !== '' && $normalizeStr($oc_product['model']) === $normalizeStr($mp_variant['sku'])) {
+                            $oc_product['mp_id'] = $mp_variant['id'];
+                            $oc_product['mp_sync_status_code'] = 'in_mp';
+                            $oc_product['mp_sync_status'] = $this->language->get('mp_status_in_mp');
+                            $oc_product['mp_sync_issues'] = 'mp_variant_sku: '.$mp_variant['sku'].' <br>';
+                            $oc_product['mp_matched_by'] = 'oc_variant_and_product_id';
+                        }
+                    }
+                }
+                */
+                //else {
+                    // Product Not in MP (by ext_ref) // oc products not found/matched within mp products - to be exported to mp via API POST
+                    
+                    $oc_product['mp_id'] = null;
+                    
+                    $oc_product['mp_sync_status_code'] = 'missing';
+                    $oc_product['mp_sync_status'] = $this->language->get('mp_status_missing');
+                    $oc_product['mp_sync_issues'] = 'not_in_mp_feed';
+                    $oc_product['mp_matched_by'] = 'none';
+                //}
+            }
+            
+            // Everything else in $oc_product (image, categories, prices etc.) comes from OC, same as now.
+            //$out[] = $oc_product;
+            $out[$ext_ref] = $oc_product;
         }
+        
+        // create json files for mp imports via API * Keep the same structure keyed by ext_ref
+        $patch  = array();
+        $post   = array();
+        foreach ($out as $ext_ref => $entry) {
+            if ($entry['mp_sync_status_code'] === 'out_of_sync' || $entry['mp_sync_status_code'] === 'price_stock_diff') {
+                $patch[$ext_ref] = $entry;
+            } elseif ($entry['mp_sync_status_code'] === 'missing') {
+                $post[$ext_ref] = $entry;
+            }
+        }
+        
+        // delete any existing mp-import_products- json files for mp import
+        $mppattern = DIR_LOGS . $store_slug . '_mp-import_products-*.json';
+        $mpfiles = glob($mppattern);
+        if ($mpfiles) {
+            foreach ($mpfiles as $mpf) {
+                @unlink($mpf);
+            }
+        }
+        // delete any existing _oc-export_preselected-products_ json files
+        $ocpattern = DIR_LOGS . $store_slug . '_oc-export_preselected-products_*.json';
+        $ocfiles = glob($ocpattern);
+        if ($ocfiles) {
+            foreach ($ocfiles as $ocf) {
+                @unlink($ocf);
+            }
+        }
+        
+        $patchfile      = DIR_LOGS . $store_slug . '_mp-import_products-patch_' . date('Y-m-d') . '.json';
+        $postfile       = DIR_LOGS . $store_slug . '_mp-import_products-post_' . date('Y-m-d') . '.json';
+        $deletefile     = DIR_LOGS . $store_slug . '_mp-import_products-delete_' . date('Y-m-d') . '.json';
+        
+        $ocproductsfile = DIR_LOGS . $store_slug . '_oc-export_preselected-products_' . date('Y-m-d') . '.json';
+        
+        // assemble json patch and save
+        $patchcache = array(
+            'meta'      => array('file' => $patchfile, 'generated' => time(), 'store_slug' => $store_slug),
+            'patch'       => $patch
+        );
+        // write atomically
+        $tmp = $patchfile . '.tmp';
+        file_put_contents($tmp, json_encode($patchcache, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT), LOCK_EX);
+        @rename($tmp, $patchfile);
+        
+        // assemble json post and save
+        $postcache = array(
+            'meta'      => array('file' => $postfile, 'generated' => time(), 'store_slug' => $store_slug),
+            'post'      => $post
+        );
+        // write atomically
+        $tmp = $postfile . '.tmp';
+        file_put_contents($tmp, json_encode($postcache, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT), LOCK_EX);
+        @rename($tmp, $postfile);
+        
+        // assemble json delete and save
+        $deletecache = array(
+            'meta'      => array('file' => $deletefile, 'generated' => time(), 'store_slug' => $store_slug),
+            'delete'    => $mp_delete
+        );
+        // write atomically
+        $tmp = $deletefile . '.tmp';
+        file_put_contents($tmp, json_encode($deletecache, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT), LOCK_EX);
+        @rename($tmp, $deletefile);
+        
+        // assemble json oc preselected and save
+        $ocpreselectedcache = array(
+            'meta'      => array('file' => $ocproductsfile, 'generated' => time(), 'store_slug' => $store_slug),
+            'oc'    => $out
+        );
+        // write atomically
+        $tmp = $ocproductsfile . '.tmp';
+        file_put_contents($tmp, json_encode($ocpreselectedcache, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT), LOCK_EX);
+        @rename($tmp, $ocproductsfile);
+        
+        return array('success' => true, 'error' => false, 'file' => $api_cache_file, 'stale' => $api_cache_stale, 'oc' => $out);
+        //return $out;
     }
     
-    if (!empty($candidates)) {
-        // If multiple TVA-like rates exist, pick the highest value (usually main VAT)
-        usort($candidates, function($a, $b) {
-            if ($a['value'] == $b['value']) return 0;
-            return ($a['value'] < $b['value']) ? 1 : -1;
+    protected function loadMpApiProductsCache($store_slug, $max_age_hours = 24) {
+        $path = $this->getLatestMpApiProductsCachePath($store_slug);
+        if (!$path || !file_exists($path)) {
+            return array('data' => array(), 'stale' => true, 'file' => null);
+        }
+        
+        $mtime = filemtime($path);
+        $stale = false;
+        if ($max_age_hours > 0 && (time() - $mtime) > ($max_age_hours * 3600)) {
+            $stale = true;
+        }
+        
+        $raw = file_get_contents($path);
+        $json = json_decode($raw, true);
+        if (!is_array($json)) {
+            return array('data' => array(), 'stale' => true, 'file' => $path);
+        }
+        
+        return array('data' => $json, 'stale' => $stale, 'file' => $path);
+    }
+    protected function getLatestMpApiProductsCachePath($store_slug) {
+        $pattern = DIR_LOGS . $store_slug . '_mp-export_api-products-cache_*.json';
+        $files = glob($pattern);
+        if (!$files) {
+            return null;
+        }
+        
+        // Filenames contain date, but easiest is “newest by mtime”
+        usort($files, function($a, $b) {
+            return filemtime($b) - filemtime($a);
         });
-        $cache = $candidates[0];
-        return $cache;
+        
+        return $files[0];
     }
     
-    // Fallback: use first tax row
-    $first = reset($rows);
-    if (is_array($first)) {
-        $cache = array(
-            'id'    => isset($first['id'])    ? (int)$first['id']    : 1, // null or 1 as fallback 
-            'value' => isset($first['value']) ? (float)$first['value'] : 21.0, // 0.0 or 21.0 as fallback as for Romania in 2025
-            'name'  => isset($first['name'])  ? $first['name']       : 'TVA', // mepty or TVA as fallback for Romania
-            'file'  => $file,
+    protected function buildMpIndexFromApiCache(array $api_cache) {
+        $mpByExtRef = array();
+        $mpDelete = array();
+        $list = array();
+        
+        if (isset($api_cache['json']['data']) && is_array($api_cache['json']['data'])) {
+            $list = $api_cache['json']['data'];
+        } else {
+            $list = $api_cache; // if raw array of mp products
+        }
+        
+        foreach ($list as $row) {
+            if (!is_array($row)) continue;
+            
+            if (isset($row['ext_ref']) && !empty($row['ext_ref'])) {
+                $ext_ref = trim($row['ext_ref']);
+                $mpByExtRef[$ext_ref] = $row;
+            }
+            else {
+                $mp_id = $row['id'];
+                $mpDelete[$mp_id] = $row;
+            }
+            
+            if (isset($row['variants']) && !empty($row['variants'])) {
+                if (!is_array($row['variants'])) continue;
+                foreach($row['variants'] as $variant) {
+                    if (!is_array($variant)) continue;
+                    $variant['type'] = 'variant';
+                    $variant['name'] = $row['name'];
+                    $variant['category_id'] = $row['category_id'];
+                    $variant['category_name'] = $row['category_id'] ? $row['category_name'] : null;
+                    $variant['categories'] = $row['category_id'] ? $row['categories'] : null;
+                    $variant['status'] = $row['status'];
+                    if (isset($variant['ext_ref']) && !empty($variant['ext_ref'])) {
+                        $ext_ref = trim($variant['ext_ref']);
+                        $mpByExtRef[$ext_ref] = $variant;
+                    }
+                    else {
+                        $mp_id = $variant['id'];
+                        $mpDelete[$mp_id] = $variant;
+                    }
+                }
+            }
+        }
+        
+        return array('mp_extref' => $mpByExtRef, 'mp_delete' => $mpDelete);
+    }
+/*
+protected function buildMpDeleteFromApiCache(array $api_cache) {
+    $mpDelete = array();
+    $list = array();
+    
+    if (isset($api_cache['json']['data']) && is_array($api_cache['json']['data'])) {
+        $list = $api_cache['json']['data'];
+    } else {
+        $list = $api_cache; // if raw array of products
+    }
+    
+    foreach ($list as $row) {
+        
+        if (!is_array($row)) continue;
+        
+        if ($row['ext_ref'] === null) {
+            $mp_id = $row['id'];
+            $mpDelete[$mp_id] = $row;
+        }
+        
+        if (isset($row['variants']['ext_ref']) && $row['variants']['ext_ref'] === null) {
+            $mp_id = $row['variants']['id'];
+            $mpDelete[$mp_id] = $row;
+        }
+        
+    }
+    
+    return $mpDelete;
+}
+*/
+    
+    /* === start of get Product details for MerchantPro API actions === */
+    
+    // Build a minimal OC product row for MP sync. // used for getProductDetailsForMP(). 
+    // @param int $product_id * @return array|null
+    public function getOcProductRowForMp($product_id) {
+        $product_id  = (int)$product_id;
+        $language_id = (int)$this->config->get('config_language_id');
+        
+        // Base product data
+        $sql = "SELECT p.product_id, p.model, p.price, p.quantity, p.status, pd.name
+                FROM `" . DB_PREFIX . "product` p
+                    LEFT JOIN `" . DB_PREFIX . "product_description` pd ON (p.product_id = pd.product_id)
+                WHERE p.product_id = '" . $product_id . "'
+                    AND pd.language_id = '" . $language_id . "' ";
+        
+        $q = $this->db->query($sql);
+        if (!$q->num_rows) {
+            return null;
+        }
+        
+        $row = $q->row;
+        
+        // Lowest active special price if any
+        $lowest_special = $this->getProductLowestSpecial($product_id);
+        $lowest_special = !empty($lowest_special) ? $lowest_special : 0.0; 
+        
+        // Detect product_type:
+        // If product has select options, treat as 'variable', else 'simple'
+        $opt_q = $this->db->query("
+            SELECT po.product_option_id, o.type
+            FROM `" . DB_PREFIX . "product_option` po
+                LEFT JOIN `" . DB_PREFIX . "option` o ON (po.option_id = o.option_id)
+            WHERE po.product_id = '" . $product_id . "'
+        ");
+        
+        $has_select = false;
+        foreach ($opt_q->rows as $opt) {
+            if (!empty($opt['type']) && $opt['type'] == 'select') {
+                $has_select = true;
+                break;
+            }
+        }
+        
+        $product_type = $has_select ? 'variable' : 'simple';
+        //$product_type = empty($this->getProductSelectOptions($product_id)) ? 'simple' : 'variable';
+        
+        $mp_id = null;
+        // get MP products from cache or build that cache
+        $mp_cache = $this->getConsolidatedMPcache();
+        $mp_products = isset($mp_cache['map']) ? $mp_cache['map'] : array();
+        if( isset($mp_products[$product_id]) ) {
+            $mp_id = $mp_products[$product_id]['mp_id'];
+        }
+        
+        $ocproduct = array(
+            'product_type'    => $product_type,          // simple / variable
+            'product_id'      => $product_id,
+            'product_id_base' => $product_id,           // for compatibility with your earlier code
+            'mp_id'           => $mp_id,                // null => POST, >0 => PATCH
+            'model'           => $row['model'],
+            'ext_ref'         => $product_id,
+            'name'            => $row['name'],
+            'price'           => (float)$row['price'],
+            'lowest_special'  => $lowest_special,
+            'quantity'        => (float)$row['quantity'],
+        );
+        
+        return $ocproduct;
+    }
+    
+    // Build product details suitable for MP API POST/PATCH.
+    // @param array $ocproduct -> Row from your OC products list (must contain at least product_type, product_id, product_id_base, mp_id, model, model_base, ext_ref, name, price, lowest_special, quantity).
+    public function getProductDetailsForMP($ocproduct) {
+        $language_id = (int)$this->config->get('config_language_id');
+        
+        $error = '';
+        
+        // --- Decide MP product type based on OC product_type ---
+        if (!isset($ocproduct['product_type'])) {
+            return array(
+                'success'               => false,
+                'error'                 => 'Missing OC product_type',
+                'product'               => array(),
+                'missing_categories'    => array()
+            );
+        }
+        
+        if ($ocproduct['product_type'] === 'simple') {
+            $mp_type = 'basic';
+        } elseif ($ocproduct['product_type'] === 'variable') {
+            $mp_type = 'multi_variant';
+        } else {
+            // We do not support other OC "types" (variant-only rows, undefined, etc.)
+            return array(
+                'success'               => false,
+                'error'                 => 'Cannot use variant or undefined product type (' . $ocproduct['product_type'] . ')',
+                'product'               => array(),
+                'missing_categories'    => array()
+            );
+        }
+        
+        // Base OC product id (the main product, not variant suffix)
+        $product_id = isset($ocproduct['product_id_base'])
+            ? (int)$ocproduct['product_id_base']
+            : (int)$ocproduct['product_id'];
+    
+        // --- Load main product + description (with your extra columns) ---
+        $pdsql = $this->db->query("
+            SELECT p.*, pd.*
+            FROM `" . DB_PREFIX . "product` p
+            LEFT JOIN `" . DB_PREFIX . "product_description` pd
+                ON (p.product_id = pd.product_id)
+            WHERE pd.language_id = '" . $language_id . "'
+              AND p.product_id    = '" . (int)$product_id . "'
+        ")->row;
+        
+        if (!$pdsql) {
+            return array(
+                'success'               => false,
+                'error'                 => 'OC product not found (ID ' . (int)$product_id . ')',
+                'product'               => array(),
+                'missing_categories'    => array()
+            );
+        }
+        
+        // --- Load attributes and build HTML table (your existing helper) ---
+        $pasql = $this->db->query("
+            SELECT pa.attribute_id, ad.name, pa.text, pa.filterseo
+            FROM " . DB_PREFIX . "product_attribute pa
+            LEFT JOIN " . DB_PREFIX . "attribute_description ad
+                   ON (pa.attribute_id = ad.attribute_id
+                   AND ad.language_id = '" . $language_id . "')
+            WHERE pa.product_id = '" . (int)$product_id . "'
+        ")->rows;
+        
+        $pattrtable = $this->buildAttributesHtmlTable($pasql);
+        
+        // --- Build full HTML description (OC -> MP) ---
+        $description_parts = array();
+        
+        if (!empty($pdsql['description'])) {
+            $description_parts[] = $this->cleanhtml($pdsql['description']);
+        }
+        if (!empty($pattrtable)) {
+            $description_parts[] = $pattrtable;
+        }
+        if (!empty($pdsql['specificatii'])) {
+            $description_parts[] = $this->cleanhtml($pdsql['specificatii']);
+        }
+        if (!empty($pdsql['aplicatii'])) {
+            $description_parts[] = $this->cleanhtml($pdsql['aplicatii']);
+        }
+        
+        $description = '';
+        if (!empty($description_parts)) {
+            $description = implode('<hr>', $description_parts);
+        }
+        
+        // --- Meta fields ---
+        $meta_title = isset($ocproduct['name']) ? $ocproduct['name'] : $pdsql['name'];
+        
+        if (!empty($pdsql['meta_description'])) {
+            $meta_description = $this->cleantxt($pdsql['meta_description']);
+        } elseif (!empty($pattrtable)) {
+            $meta_description = $this->cleantxt($pattrtable);
+        } else {
+            $meta_description = '';
+        }
+        
+        // --- Identity (sku, ext_ref) ---
+        $sku = isset($ocproduct['model']) ? $ocproduct['model'] : (isset($pdsql['model']) ? $pdsql['model'] : '');
+        $ext_ref = isset($ocproduct['ext_ref']) ? $ocproduct['ext_ref'] : $product_id;
+        
+        if ($sku === '') {
+            $error .= ($error ? ' / ' : '') . 'OC product model is empty';
+        }
+        if ($ext_ref === '' || $ext_ref === null) {
+            $ext_ref = $product_id;
+        }
+        if (empty($ocproduct['name']) && empty($pdsql['name'])) {
+            $error .= ($error ? ' / ' : '') . 'OC product name is empty';
+        }
+        
+        $product_name = isset($ocproduct['name']) ? $ocproduct['name'] : $pdsql['name'];
+        
+        // --- TAX: read TVA from MP cached taxonomy JSON ---
+        $mpTax = $this->getMpTvaFromCache();
+        $mp_tva_value = isset($mpTax['value']) ? (float)$mpTax['value'] : 21.0; // 0.0 or 21.0 as fallback for Romania 2025
+        if ($mp_tva_value <= 0) {
+            // Fallback TVA (adjust if your MP shop uses another value)
+            $mp_tva_value = 21.0;
+        }
+        
+        // --- Base prices (gross/net) ---
+        $price_source_gross = 0.0;
+        if (isset($ocproduct['lowest_special']) && (float)$ocproduct['lowest_special'] > 0) {
+            // promo price
+            $price_source_gross = (float)$ocproduct['lowest_special'];
+        } else {
+            $price_source_gross = isset($ocproduct['price']) ? (float)$ocproduct['price'] : (float)$pdsql['price'];
+        }
+        
+        $price_gross = $price_source_gross;
+        $price_net   = ($price_gross > 0)
+            ? round($price_gross / (1 + $mp_tva_value / 100), 4)
+            : 0.0;
+        
+        $old_price_gross = '';
+        $old_price_net   = '';
+        
+        if (isset($ocproduct['lowest_special']) && (float)$ocproduct['lowest_special'] > 0) {
+            // oc price is "old" price
+            $old_price_gross = isset($ocproduct['price']) ? (float)$ocproduct['price'] : (float)$pdsql['price'];
+            $old_price_net   = round($old_price_gross / (1 + $mp_tva_value / 100), 4);
+        }
+        
+        // --- Optional cost (if you have a cost column) ---
+        $pcost_gross = isset($pdsql['cost']) ? (float)$pdsql['cost'] : 0.0;
+        $cost_gross  = $pcost_gross > 0 ? $pcost_gross : null;
+        $cost_net    = ($cost_gross !== null && $cost_gross > 0)
+            ? round($cost_gross / (1 + $mp_tva_value / 100), 4)
+            : null;
+        
+        // --- Stock & inventory ---
+        $quantity = isset($ocproduct['quantity'])
+            ? (float)$ocproduct['quantity']
+            : (isset($pdsql['quantity']) ? (float)$pdsql['quantity'] : 0.0);
+        
+        $inventory_enabled = 'on'; // on/off as per MP docs
+        $allow_backorders  = true;
+        
+        // --- Weight (assuming already normalized to kg elsewhere) ---
+        $weight = isset($pdsql['weight']) ? (float)$pdsql['weight'] : 0.0;
+        
+        // --- Quantity multiplier ---
+        $qty_multiplier = 1;
+        if (!empty($pdsql['minimum']) && (int)$pdsql['minimum'] > 1) {
+            $qty_multiplier = (int)$pdsql['minimum'];
+        } elseif (!empty($pdsql['name']) && stripos($pdsql['name'], 'banda led') !== false) {
+            $qty_multiplier = 5;
+        }
+        
+        // --- Categories: map OC category_ids -> MP category_id + categories[] ---
+        $oc_categories = array();
+        $qCats = $this->db->query("
+            SELECT category_id
+            FROM `" . DB_PREFIX . "product_to_category`
+            WHERE product_id = '" . (int)$product_id . "'
+        ");
+        foreach ($qCats->rows as $r) {
+            $oc_categories[] = (int)$r['category_id'];
+        }
+        
+        $ocToMpCat   = $this->getOcToMpCategoryMapFromJson();
+        $mpCatNames  = $this->getMpCategoryNameMapFromCache();
+        
+        $categories            = array();
+        $primary_category_id   = 0;
+        $missing_categories    = array();
+        
+        foreach ($oc_categories as $cid) {
+            if (isset($ocToMpCat[$cid])) {
+                $mp_id = (int)$ocToMpCat[$cid];
+                if (!$primary_category_id) {
+                    $primary_category_id = $mp_id;
+                }
+                $cat = array('id' => $mp_id);
+                if (isset($mpCatNames[$mp_id])) {
+                    $cat['name'] = $mpCatNames[$mp_id];
+                }
+                $categories[] = $cat;
+            } else {
+                // Keep track of OC categories which are not yet mapped to MP
+                $missing_categories[] = $cid;
+            }
+        }
+        
+        // --- Base MP product payload (no variants yet) ---
+        $product = array(
+            // For PATCH, MP expects id here. For POST, omit or keep null.
+            'id'               => isset($ocproduct['mp_id']) && $ocproduct['mp_id']
+                                    ? (int)$ocproduct['mp_id']
+                                    : null,
+            
+            'type'             => $mp_type,
+            
+            'sku'              => $sku,
+            'ext_ref'          => $ext_ref,
+            'name'             => $product_name,
+            'description'      => $description,
+            'meta_title'       => $meta_title,
+            'meta_description' => $meta_description,
+            
+            'inventory_enabled' => $inventory_enabled,
+            'stock'             => $quantity,
+            'stock_reserved'    => 0,
+            'allow_backorders'  => $allow_backorders,
+            
+            'price_net'         => $price_net,
+            'price_gross'       => $price_gross,
+            'old_price_net'     => $old_price_net,
+            'old_price_gross'   => $old_price_gross,
+            
+            'cost_net'          => $cost_net,
+            'cost_gross'        => $cost_gross,
+            
+            'tax_id'            => isset($mpTax['id']) ? (int)$mpTax['id'] : null,
+            'tax_value'         => $mp_tva_value,
+            'tax_name'          => isset($mpTax['name']) ? $mpTax['name'] : null,
+            
+            'quantity_multiplier' => $qty_multiplier,
+            'weight'              => $weight,
+            
+            'category_id'        => $primary_category_id ?: null,
+            'category_name'      => $primary_category_id && isset($mpCatNames[$primary_category_id])
+                                    ? $mpCatNames[$primary_category_id]
+                                    : null,
+            'categories'         => $categories,
+        );
+        
+        // --- Multi-variant product: build variant_attributes + variants from OC options ---
+        if ($mp_type === 'multi_variant') {
+            $select_options = $this->getProductSelectOptions($product_id);
+            
+            if (!empty($select_options)) {
+                $variant_data = $this->buildMpVariantsFromOcOptions(
+                    $ocproduct,
+                    $select_options,
+                    $mpTax,
+                    $price_net,
+                    $price_gross
+                );
+                $product['variant_attributes'] = $variant_data['variant_attributes'];
+                $product['variants']           = $variant_data['variants'];
+            } else {
+                // If OC says "variable" but there are no select options, fall back to basic
+                $product['type'] = 'basic';
+            }
+        }
+        
+        // success is true only if we do not have hard errors and all OC categories are mapped
+        $success = ($error === '' && empty($missing_categories));
+        
+        return array(
+            'success'            => $success,
+            'error'              => $error,
+            'product'            => $product,            // MP-ready payload
+            'missing_categories' => $missing_categories, // list of OC category_ids that have no MP mapping
         );
     }
     
-    return $cache;
-}
-
-// Map OC category_id → MP category_id via {slug}_mp-export_categories-sync_PATCH_YYYY-MM-DD.json
-// Uses the JSON files produced by computeCategorySyncStatus()
-protected function getOcToMpCategoryMapFromJson() {
-    static $map_cache = null;
-    
-    if ($map_cache !== null) {
-        return $map_cache;
-    }
-    
-    $map_cache = array();
-    
-    $slug = $this->getMpStoreSlugFromSettings();
-    if ($slug === '') {
-        return $map_cache;
-    }
-    
-    // Files like: {slug}_mp-export_categories-sync_PATCH_YYYY-MM-DD.json
-    $pattern = DIR_LOGS . $slug . '_mp-export_categories-sync_PATCH_*.json';
-    $files   = glob($pattern);
-    if (!$files) {
-        return $map_cache;
-    }
-    usort($files, function($a, $b) {
-        return filemtime($b) - filemtime($a);
-    });
-    $file = $files[0];
-    $raw  = @file_get_contents($file);
-    if ($raw === false) {
-        return $map_cache;
-    }
-    $json = json_decode($raw, true);
-    if (!is_array($json) || !isset($json['items']) || !is_array($json['items'])) {
-        return $map_cache;
-    }
-    foreach ($json['items'] as $item) {
-        if (!is_array($item)) continue;
+    // Read TVA tax from cached taxonomy JSON (*_mp-export_taxes-cache_*.json)
+    public function getMpTvaFromCache() {
         
-        if (!isset($item['oc_category_id'])) continue;
-        
-        $cid  = (int)$item['oc_category_id'];
-        $mpId = 0;
-        
-        if (isset($item['mp_id']) && (int)$item['mp_id'] > 0) {
-            $mpId = (int)$item['mp_id'];
-        } elseif (isset($item['payload']) && is_array($item['payload']) && isset($item['payload']['id'])) {
-            $mpId = (int)$item['payload']['id'];
+        $storeslug = $this->getMpStoreSlugFromSettings();
+        //$cache = array('id' => null, 'value' => 0.0, 'name' => '', 'file' => null);
+        $cache = array('id' => 1, 'value' => 21.0, 'name' => 'TVA', 'file' => null); // fallback for Romania as 2025
+        if ($storeslug === '') {
+            return $cache;
         }
-
-        if ($cid > 0 && $mpId > 0) {
-            $map_cache[$cid] = $mpId;
-        }
-    }
-
-    return $map_cache;
-}
-
-// MP category id → name map from *_mp-export_all-categories-cache_*.json
-// This helps to fill category_name and categories[].name
-protected function getMpCategoryNameMapFromCache() {
-    
-    static $name_cache = null;
-    
-    if ($name_cache !== null) {
-        return $name_cache;
-    }
-    
-    $name_cache = array();
-    
-    $slug = $this->getMpStoreSlugFromSettings();
-    if ($slug === '') {
-        return $name_cache;
-    }
-    
-    // Files like: {slug}_mp-export_all-categories-cache_YYYY-MM-DD.json
-    $pattern = DIR_LOGS . $slug . '_mp-export_all-categories-cache_*.json';
-    $files   = glob($pattern);
-    if (!$files) {
-        return $name_cache;
-    }
-    usort($files, function($a, $b) {
-        return filemtime($b) - filemtime($a);
-    });
-    $file = $files[0];
-    $raw  = @file_get_contents($file);
-    if ($raw === false) {
-        return $name_cache;
-    }
-    $json = json_decode($raw, true);
-    if (!is_array($json)) {
-        return $name_cache;
-    }
-
-    if (isset($json['json']) && is_array($json['json']) && isset($json['json']['data']) && is_array($json['json']['data'])) {
-        foreach ($json['json']['data'] as $cat) {
-            if (!is_array($cat) || !isset($cat['id'])) continue;
-
-            $id   = (int)$cat['id'];
-            $name = isset($cat['name']) ? $cat['name'] : '';
-
-            $name_cache[$id] = $name;
-        }
-    }
-
-    return $name_cache;
-}
-
-// helper for multi-variant : build variant_attributes + variants
-// converts getProductSelectOptions() output (select-type OC options) into MP’s variant_attributes and variants structure.
-protected function buildMpVariantsFromOcOptions($ocproduct, $select_options, $mpTax, $base_price_net, $base_price_gross) {
-    $variant_attributes = array();
-    $variants           = array();
-    
-    $mp_tva_value = isset($mpTax['value']) ? (float)$mpTax['value'] : 0.0;
-    if ($mp_tva_value <= 0) {
-        $mp_tva_value = 21.0; // fallback as for Romania 2025
-    }
-    
-    // 1) Build variant_attributes[] from all select options
-    foreach ($select_options as $sel) {
-        if (!isset($sel['name'])) continue;
         
-        $attrName = trim($sel['name']);
-        if ($attrName === '') continue;
+        $pattern = DIR_LOGS . $storeslug . '_mp-export_taxes-cache_*.json';
+        $files   = glob($pattern);
+        if (!$files) {
+            return $cache;
+        }
+        usort($files, function($a, $b) {
+            return filemtime($b) - filemtime($a);
+        });
+        $file = $files[0];
+        $raw  = @file_get_contents($file);
+        if ($raw === false) {
+            return $cache;
+        }
+        $json = json_decode($raw, true);
+        if (!is_array($json)) {
+            return $cache;
+        }
+        // Try to locate list of taxes
+        $rows = array();
+        if (isset($json['json']) && is_array($json['json']) && !isset($json['json']['error']) ) {
+            $rows = $json['json'];
+        }
+        if (!$rows) {
+            return $cache;
+        }
         
-        if (!isset($variant_attributes[$attrName])) {
-            $variant_attributes[$attrName] = array(
-                'name'    => $attrName,
-                'options' => array()
+        $candidates = array();
+        foreach ($rows as $t) {
+            if (!is_array($t)) continue;
+            
+            $id   = isset($t['id'])    ? (int)$t['id']    : 0;
+            $name = isset($t['name'])  ? trim($t['name']) : '';
+            $val  = isset($t['value']) ? (float)$t['value'] : null;
+            
+            if ($id <= 0 || $name === '' || $val === null) continue;
+            
+            $row = array('id' => $id, 'value' => $val, 'name' => $name, 'file' => $file);
+            
+            $lname = strtolower($name);
+            if (strpos($lname, 'tva') !== false || strpos($lname, 'vat') !== false) {
+                $candidates[] = $row;
+            }
+        }
+        
+        if (!empty($candidates)) {
+            // If multiple TVA-like rates exist, pick the highest value (usually main VAT)
+            usort($candidates, function($a, $b) {
+                if ($a['value'] == $b['value']) return 0;
+                return ($a['value'] < $b['value']) ? 1 : -1;
+            });
+            $cache = $candidates[0];
+            return $cache;
+        }
+        
+        // Fallback: use first tax row
+        $first = reset($rows);
+        if (is_array($first)) {
+            $cache = array(
+                'id'    => isset($first['id'])    ? (int)$first['id']    : 1, // null or 1 as fallback 
+                'value' => isset($first['value']) ? (float)$first['value'] : 21.0, // 0.0 or 21.0 as fallback as for Romania in 2025
+                'name'  => isset($first['name'])  ? $first['name']       : 'TVA', // mepty or TVA as fallback for Romania
+                'file'  => $file,
             );
         }
         
-        if (!empty($sel['options']) && is_array($sel['options'])) {
+        return $cache;
+    }
+    
+    // Map OC category_id → MP category_id via {slug}_mp-export_categories-sync_PATCH_YYYY-MM-DD.json
+    // Uses the JSON files produced by computeCategorySyncStatus()
+    protected function getOcToMpCategoryMapFromJson() {
+        static $map_cache = null;
+        
+        if ($map_cache !== null) {
+            return $map_cache;
+        }
+        
+        $map_cache = array();
+        
+        $slug = $this->getMpStoreSlugFromSettings();
+        if ($slug === '') {
+            return $map_cache;
+        }
+        
+        // Files like: {slug}_mp-export_categories-sync_PATCH_YYYY-MM-DD.json
+        $pattern = DIR_LOGS . $slug . '_mp-export_categories-sync_PATCH_*.json';
+        $files   = glob($pattern);
+        if (!$files) {
+            return $map_cache;
+        }
+        usort($files, function($a, $b) {
+            return filemtime($b) - filemtime($a);
+        });
+        $file = $files[0];
+        $raw  = @file_get_contents($file);
+        if ($raw === false) {
+            return $map_cache;
+        }
+        $json = json_decode($raw, true);
+        if (!is_array($json) || !isset($json['items']) || !is_array($json['items'])) {
+            return $map_cache;
+        }
+        foreach ($json['items'] as $item) {
+            if (!is_array($item)) continue;
+            
+            if (!isset($item['oc_category_id'])) continue;
+            
+            $cid  = (int)$item['oc_category_id'];
+            $mpId = 0;
+            
+            if (isset($item['mp_id']) && (int)$item['mp_id'] > 0) {
+                $mpId = (int)$item['mp_id'];
+            } elseif (isset($item['payload']) && is_array($item['payload']) && isset($item['payload']['id'])) {
+                $mpId = (int)$item['payload']['id'];
+            }
+            
+            if ($cid > 0 && $mpId > 0) {
+                $map_cache[$cid] = $mpId;
+            }
+        }
+        
+        return $map_cache;
+    }
+    
+    // MP category id → name map from *_mp-export_all-categories-cache_*.json
+    // This helps to fill category_name and categories[].name
+    protected function getMpCategoryNameMapFromCache() {
+        
+        static $name_cache = null;
+        
+        if ($name_cache !== null) {
+            return $name_cache;
+        }
+        
+        $name_cache = array();
+        
+        $slug = $this->getMpStoreSlugFromSettings();
+        if ($slug === '') {
+            return $name_cache;
+        }
+        
+        // Files like: {slug}_mp-export_all-categories-cache_YYYY-MM-DD.json
+        $pattern = DIR_LOGS . $slug . '_mp-export_all-categories-cache_*.json';
+        $files   = glob($pattern);
+        if (!$files) {
+            return $name_cache;
+        }
+        usort($files, function($a, $b) {
+            return filemtime($b) - filemtime($a);
+        });
+        $file = $files[0];
+        $raw  = @file_get_contents($file);
+        if ($raw === false) {
+            return $name_cache;
+        }
+        $json = json_decode($raw, true);
+        if (!is_array($json)) {
+            return $name_cache;
+        }
+        
+        if (isset($json['json']) && is_array($json['json']) && isset($json['json']['data']) && is_array($json['json']['data'])) {
+            foreach ($json['json']['data'] as $cat) {
+                if (!is_array($cat) || !isset($cat['id'])) continue;
+                
+                $id   = (int)$cat['id'];
+                $name = isset($cat['name']) ? $cat['name'] : '';
+                
+                $name_cache[$id] = $name;
+            }
+        }
+        
+        return $name_cache;
+    }
+    
+    // helper for multi-variant : build variant_attributes + variants
+    // converts getProductSelectOptions() output (select-type OC options) into MP’s variant_attributes and variants structure.
+    protected function buildMpVariantsFromOcOptions($ocproduct, $select_options, $mpTax, $base_price_net, $base_price_gross) {
+        $variant_attributes = array();
+        $variants           = array();
+        
+        $mp_tva_value = isset($mpTax['value']) ? (float)$mpTax['value'] : 0.0;
+        if ($mp_tva_value <= 0) {
+            $mp_tva_value = 21.0; // fallback as for Romania 2025
+        }
+        
+        // 1) Build variant_attributes[] from all select options
+        foreach ($select_options as $sel) {
+            if (!isset($sel['name'])) continue;
+            
+            $attrName = trim($sel['name']);
+            if ($attrName === '') continue;
+            
+            if (!isset($variant_attributes[$attrName])) {
+                $variant_attributes[$attrName] = array(
+                    'name'    => $attrName,
+                    'options' => array()
+                );
+            }
+            
+            if (!empty($sel['options']) && is_array($sel['options'])) {
+                foreach ($sel['options'] as $opt) {
+                    $val = isset($opt['option']) ? trim($opt['option']) : '';
+                    if ($val === '') continue;
+                    
+                    // de-duplicate per attribute
+                    if (!isset($variant_attributes[$attrName]['options'][$val])) {
+                        $variant_attributes[$attrName]['options'][$val] = array(
+                            // MP docs: options[].value; id/position/available are optional when creating
+                            'value' => $val
+                        );
+                    }
+                }
+            }
+        }
+        
+        // Flatten options
+        foreach ($variant_attributes as $k => $attr) {
+            $variant_attributes[$k]['options'] = array_values($attr['options']);
+        }
+        $variant_attributes = array_values($variant_attributes);
+        
+        // 2) Build variants[] – one variant per option
+        // NOTE: This handles the common case with one select attribute.
+        // If you have multiple select attributes, you may want to expand full combinations later.
+        foreach ($select_options as $sel) {
+            if (!isset($sel['name'])) continue;
+            
+            $attrName = trim($sel['name']);
+            if ($attrName === '') continue;
+            
+            if (empty($sel['options']) || !is_array($sel['options'])) continue;
+            
             foreach ($sel['options'] as $opt) {
-                $val = isset($opt['option']) ? trim($opt['option']) : '';
-                if ($val === '') continue;
+                $value = isset($opt['option']) ? trim($opt['option']) : '';
+                if ($value === '') continue;
                 
-                // de-duplicate per attribute
-                if (!isset($variant_attributes[$attrName]['options'][$val])) {
-                    $variant_attributes[$attrName]['options'][$val] = array(
-                        // MP docs: options[].value; id/position/available are optional when creating
-                        'value' => $val
-                    );
+                $suffix = $this->slugifyForExtRef($value);
+                
+                // Variant gross price from base + option diff
+                $variant_price_gross = $base_price_gross;
+                if (isset($opt['price']) && (float)$opt['price'] != 0 && isset($opt['price_prefix'])) {
+                    if ($opt['price_prefix'] === '+') {
+                        $variant_price_gross += (float)$opt['price'];
+                    } elseif ($opt['price_prefix'] === '-') {
+                        $variant_price_gross -= (float)$opt['price'];
+                    }
                 }
-            }
-        }
-    }
-    
-    // Flatten options
-    foreach ($variant_attributes as $k => $attr) {
-        $variant_attributes[$k]['options'] = array_values($attr['options']);
-    }
-    $variant_attributes = array_values($variant_attributes);
-    
-    // 2) Build variants[] – one variant per option
-    // NOTE: This handles the common case with one select attribute.
-    // If you have multiple select attributes, you may want to expand full combinations later.
-    foreach ($select_options as $sel) {
-        if (!isset($sel['name'])) continue;
-        
-        $attrName = trim($sel['name']);
-        if ($attrName === '') continue;
-        
-        if (empty($sel['options']) || !is_array($sel['options'])) continue;
-        
-        foreach ($sel['options'] as $opt) {
-            $value = isset($opt['option']) ? trim($opt['option']) : '';
-            if ($value === '') continue;
-            
-            $suffix = $this->slugifyForExtRef($value);
-            
-            // Variant gross price from base + option diff
-            $variant_price_gross = $base_price_gross;
-            if (isset($opt['price']) && (float)$opt['price'] != 0 && isset($opt['price_prefix'])) {
-                if ($opt['price_prefix'] === '+') {
-                    $variant_price_gross += (float)$opt['price'];
-                } elseif ($opt['price_prefix'] === '-') {
-                    $variant_price_gross -= (float)$opt['price'];
+                if ($variant_price_gross < 0) {
+                    $variant_price_gross = 0;
                 }
-            }
-            if ($variant_price_gross < 0) {
-                $variant_price_gross = 0;
-            }
-            
-            $variant_price_net = ($variant_price_gross > 0)
-                ? round($variant_price_gross / (1 + $mp_tva_value / 100), 4)
-                : 0.0;
-            
-            $variant_quantity = isset($opt['quantity'])
-                ? (int)$opt['quantity']
-                : (isset($ocproduct['quantity']) ? (int)$ocproduct['quantity'] : 0);
-            
-            $base_sku  = isset($ocproduct['model'])   ? $ocproduct['model']   : $ocproduct['model_base'];
-            $base_ref  = isset($ocproduct['ext_ref']) ? $ocproduct['ext_ref'] : $ocproduct['product_id_base'];
-            
-            $variant_sku = $base_sku . '_' . $suffix;
-            $variant_ext_ref = $base_ref !== '' ? $base_ref . '_' . $suffix : $ocproduct['product_id_base'] . '_' . $suffix;
-            
-            $variants[] = array(
-                // For create we usually omit id; for PATCH you can fill it later if you fetch them from MP
-                'sku'               => $variant_sku,
-                'ext_ref'           => $variant_ext_ref,
-                'inventory_enabled' => 'on',
-                'stock'             => $variant_quantity,
                 
-                'price_net'         => $variant_price_net,
-                'price_gross'       => $variant_price_gross,
+                $variant_price_net = ($variant_price_gross > 0)
+                    ? round($variant_price_gross / (1 + $mp_tva_value / 100), 4)
+                    : 0.0;
                 
-                // You can add old_price_* here if you also compute variant-specific discounts
-                'variant_options'   => array(
-                    array(
-                        // MP docs: id/option_id are optional on create, so we send name + value
-                        'name'  => $attrName,
-                        'value' => $value
+                $variant_quantity = isset($opt['quantity'])
+                    ? (int)$opt['quantity']
+                    : (isset($ocproduct['quantity']) ? (int)$ocproduct['quantity'] : 0);
+                
+                $base_sku  = isset($ocproduct['model'])   ? $ocproduct['model']   : $ocproduct['model_base'];
+                $base_ref  = isset($ocproduct['ext_ref']) ? $ocproduct['ext_ref'] : $ocproduct['product_id_base'];
+                
+                $variant_sku = $base_sku . '_' . $suffix;
+                $variant_ext_ref = $base_ref !== '' ? $base_ref . '_' . $suffix : $ocproduct['product_id_base'] . '_' . $suffix;
+                
+                $variants[] = array(
+                    // For create we usually omit id; for PATCH you can fill it later if you fetch them from MP
+                    'sku'               => $variant_sku,
+                    'ext_ref'           => $variant_ext_ref,
+                    'inventory_enabled' => 'on',
+                    'stock'             => $variant_quantity,
+                    
+                    'price_net'         => $variant_price_net,
+                    'price_gross'       => $variant_price_gross,
+                    
+                    // You can add old_price_* here if you also compute variant-specific discounts
+                    'variant_options'   => array(
+                        array(
+                            // MP docs: id/option_id are optional on create, so we send name + value
+                            'name'  => $attrName,
+                            'value' => $value
+                        )
                     )
-                )
-            );
+                );
+            }
         }
+        
+        return array(
+            'variant_attributes' => $variant_attributes,
+            'variants'           => $variants
+        );
     }
     
-    return array(
-        'variant_attributes' => $variant_attributes,
-        'variants'           => $variants
-    );
-}
-
     /* === end of get Product details for MerchantPro API actions === */
     
     // general helper to get clean html
@@ -2292,7 +2733,6 @@ protected function buildMpVariantsFromOcOptions($ocproduct, $select_options, $mp
         // Uses your existing helper
         return $this->deriveStoreSlugFromUrl($base);
     }
-
     
 }
 

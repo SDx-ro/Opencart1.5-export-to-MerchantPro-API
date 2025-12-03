@@ -65,13 +65,32 @@
             <?php echo $breadcrumb['separator']; ?><a href="<?php echo $breadcrumb['href']; ?>"><?php echo $breadcrumb['text']; ?></a>
         <?php } ?>
     </div>
-
+    
+    <?php 
+    if ($updatefeeds || $updatempprods || $updatempcats || $updatemptaxes) {
+        echo '<div class="warning">'.$text_mp_update_needed.'<br>';
+        if ($updatefeeds) {
+            echo '&nbsp; -> '. $text_current_mp_feed.'<br>';
+        }
+        if ($updatempprods) {
+            echo '&nbsp; -> '. $this->language->get('button_get_mp_products').'<br>';
+        }
+        if ($updatempcats) {
+            echo '&nbsp; -> '. $col_mp_categories.'<br>';
+        }
+        if ($updatemptaxes) {
+            echo '&nbsp; -> '. $button_get_mp_taxonomies.'<br>';
+        }
+        echo '</div>';
+    }
+    ?>
+    
     <?php if ($error_warning) { ?>
-        <div class="warning"><?php echo $error_warning; ?></div>
+    <div class="warning"><?php echo $error_warning; ?></div>
     <?php } ?>
 
     <?php if ($success) { ?>
-        <div class="success"><?php echo $success; ?></div>
+    <div class="success"><?php echo $success; ?></div>
     <?php } ?>
     
     <div class="box">
@@ -79,18 +98,13 @@
         <div class="heading">
             <h1>
                 <img src="view/image/review.png" alt="<?php echo $heading_title; ?>"> <?php echo $heading_title; ?>
-                <?php if ($updatefeeds) { ?>
-                <span class="warning" style="padding: .25em 2.25em; font-size: .75em; margin-bottom: 5px;"> <?php echo $text_mp_feed_update .' -> '. $text_current_mp_feed; ?> </span> &nbsp; 
-                <?php } ?>
-                <?php if ($updatempcats) { ?>
-                <span class="warning" style="padding: .25em 2.25em; font-size: .75em; margin-bottom: 5px;"> <?php echo $text_mp_feed_update .' -> '. $col_mp_categories; ?> </span> &nbsp; 
-                <?php } ?>
-                <?php if ($updatemptaxes) { ?>
-                <span class="warning" style="padding: .25em 2.25em; font-size: .75em; margin-bottom: 5px;"> <?php echo $text_mp_feed_update .' -> '. $button_get_mp_taxonomies; ?> </span> &nbsp; 
-                <?php } ?>
+                
             </h1>
             <div class="buttons">
-                <a href="<?php echo $export; ?>" class="button link"><?php echo $button_export; ?></a>
+                <a href="https://app.merchantpro.com/?locale=ro_RO" target="_blank" class="button link">MerchantPro Dashboard</a> &nbsp; 
+                <?php echo isset($api['mp_api_url']) ? '<a href="'.$api['mp_api_url'].'" target="_blank" class="button link">'.(isset($api['mp_api_name']) ? $api['mp_api_name'] : '').' -> MP Website</a> &nbsp; ' : ''; ?>
+                
+                <a href="<?php echo $export; ?>" class="button link"><?php echo $button_export; ?></a> &nbsp; 
             </div>
         </div>
         
@@ -104,36 +118,43 @@
                 <em><?php echo $text_no_mp_feed; ?></em> &nbsp; 
                 <?php } ?>
                 <br>
-                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/updateConsolidatedMPfeed', 'token=' . $token, 'SSL'); ?>" class="button link">
+                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/updateConsolidatedMPfeed', 'token=' . $token, 'SSL'); ?>" class="button link" style="padding: .25em;">
                     <span class="<?php echo ($updatefeeds ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $button_update_mp_feed; ?>
                 </a>
                 
                 <?php if (!empty($mp_export_consolidated_file)) { ?>
                 <br><br>
-                <a href="index.php?route=tool/sdx_export_to_mp_sync/mpXLSXdownload&token=<?php echo $token; ?>&file=<?php echo urlencode($mp_export_consolidated_file); ?>" class="button link"><?php echo 'Download: '.$mp_export_consolidated_file; ?></a>
+                <a href="index.php?route=tool/sdx_export_to_mp_sync/mpXLSXdownload&token=<?php echo $token; ?>&file=<?php echo urlencode($mp_export_consolidated_file); ?>" class="button link" style="padding: .25em;">
+                    <?php echo 'Download: '.$mp_export_consolidated_file; ?>
+                </a>
                 <?php } ?>
                 
                 <?php if (!empty($mp_export_simple_file)) { ?>
                 <br>
                 <small>
-                    <a href="index.php?route=tool/sdx_export_to_mp_sync/mpXLSXdownload&token=<?php echo $token; ?>&file=<?php echo urlencode($mp_export_simple_file); ?>" class="link"><?php echo 'Download: '.$mp_export_simple_file; ?></a>
+                    <a href="index.php?route=tool/sdx_export_to_mp_sync/mpXLSXdownload&token=<?php echo $token; ?>&file=<?php echo urlencode($mp_export_simple_file); ?>" class="link">
+                        <?php echo 'Download: '.$mp_export_simple_file; ?>
+                    </a>
                 </small>
                 <?php } ?>
                     
                 <?php if (!empty($mp_export_variants_file)) { ?>
                 <br>
                 <small>
-                    <a href="index.php?route=tool/sdx_export_to_mp_sync/mpXLSXdownload&token=<?php echo $token; ?>&file=<?php echo urlencode($mp_export_variants_file); ?>" class="link"><?php echo 'Download: '.$mp_export_variants_file; ?></a>
+                    <a href="index.php?route=tool/sdx_export_to_mp_sync/mpXLSXdownload&token=<?php echo $token; ?>&file=<?php echo urlencode($mp_export_variants_file); ?>" class="link">
+                        <?php echo 'Download: '.$mp_export_variants_file; ?>
+                    </a>
                 </small>
                 <?php } ?>
                 
             </div>
+            
             <!-- MerchatPro Products from API -->
             <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
-                <?php echo $text_current_mp_feed . ' <br> <small>' . $feeddate . '</small> <br> => <strong>'.$mp_export_consolidated_file.'</strong>'; ?>
+                <?php echo $mpproducts_source . ' <br> <small>' . $mpprodsdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mpproducts_file).'</strong>'; ?>
                 <br>
                 <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/buildMPallProductsCache', 'token=' . $token, 'SSL'); ?>" class="button link">
-                    <span class="<?php echo ($updatefeeds ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_products'); ?>
+                    <span class="<?php echo ($updatempprods ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_products'); ?>
                 </a>
             </div>
             
@@ -148,16 +169,12 @@
             
             <!-- MerchatPro Taxonomies from API -->
             <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
-                <!--
-                <?php echo $mpcategories_source . ' <br> <small>' . $mpcatsdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mpcategories_file).'</strong>'; ?>
-                -->
-                <?php echo $this->language->get('text_get_mp_taxonomies_help'); ?>
-                <br>
-                <?php echo '<small>' . $mptaxdate . '</small>'; ?>
+                <?php echo $mptaxes_source . ' <br> <small>' . $mptaxdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mptaxes_file).'</strong>'; ?>
                 <br>
                 <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/mpGetTaxonomies', 'token=' . $token, 'SSL'); ?>" class="button link">
-                    <span class="<?php echo ($updatemptaxes ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_taxonomies'); ?>
+                    <span class="<?php echo ($updatemptaxes ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $button_get_mp_taxonomies; ?>
                 </a>
+                <br><?php echo $this->language->get('text_get_mp_taxonomies_help'); ?>
             </div>
             
         </div>
@@ -235,9 +252,8 @@
                                                 <div class="prod-thumb"><img src="<?php echo $p['image']; ?>" alt="<?php echo $p['name']; ?>"></div>
                                             <?php } ?>
                                             <div class="prod-meta">
-                                                <div class="nowrap">Base ID: <strong><?php echo $p['product_id_base']; ?></strong></div>
-                                                <div class="nowrap">Show ID: <strong><?php echo $p['product_id']; ?></strong></div>
-                                                
+                                                <div class="nowrap">Product ID: <strong><?php echo $p['product_id']; ?></strong></div>
+                                                <div class="nowrap">Product Base ID: <strong><?php echo $p['product_id_base']; ?></strong></div>
                                                 <div class="nowrap">
                                                     <a href="<?php echo $p['view_product']; ?>" target="_blank">view</a>
                                                     <a href="<?php echo $p['edit_product']; ?>" target="_blank">edit</a>
@@ -462,15 +478,7 @@
             </div>
             
             <div id="tab-settings" class="tab-content">
-                <!--
-                <div style="margin-top:10px; border-top:1px solid #ddd; padding-top:10px;">
-                    <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/mpGetTaxonomies', 'token=' . $token, 'SSL'); ?>" class="button link">
-                        <?php echo $this->language->get('button_get_mp_taxonomies'); ?>
-                    </a>
-                    <span class="help"><?php echo $this->language->get('text_get_mp_taxonomies_help'); ?></span>
-                </div>
-                -->
-                <form method="post" action="<?php echo $this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $token, 'SSL'); ?>">
+                <form method="post" action="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/APIsettings', 'token=' . $token, 'SSL'); ?>">
                     <input type="hidden" name="sdx_export_to_mp_sync_module" value="1" />
                     <table class="form">
                         <tr>

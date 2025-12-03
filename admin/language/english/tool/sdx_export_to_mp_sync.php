@@ -30,20 +30,25 @@ $_['entry_api_key']             = 'API Key:';
 $_['entry_api_secret']          = 'API Secret:';
 $_['entry_feed_simple']         = 'MP Feed Simple<br> (simple/variable products)';
 $_['entry_feed_variants']       = 'MP Feed Variants<br> (variant/variation products)';
+
 $_['button_save']               = 'Save';
 $_['button_export']             = 'Export';
 
-// Strings for MP feed update
 $_['button_update_mp_feed'] = 'Update MerchantPro Products (Consolidated Feed)';
+
 $_['text_current_mp_feed']  = 'MerchantPro Products (Consolidated Feed)';
 $_['text_no_mp_feed']       = 'Consolidated Feed for MerchantPro Products is not available! <br> Click <b>'.$_['button_update_mp_feed'].'</b> <br> to download and merge feeds.';
-$_['text_mp_feed_update']   = 'Update needed!';
 $_['text_mp_feed_updated']  = 'Consolidated Feed for MerchantPro Products was updated';
+
+$_['text_mp_update_needed'] = 'Update needed!';
 
 $_['error_mp_feed_update']      = 'Failed updating the Consolidated Feed for MerchantPro Products. Check the API settings for Feeds! Possible other error(s)...';
 $_['error_no_file_specified']   = 'No file specified for download!';
 $_['error_invalid_file']        = 'Invalid file selected for download!';
 $_['error_file_not_found']      = 'The requested file could not be found!';
+
+$_['error_mp_categories_api']   = 'Could not fetch MerchantPro categories via API or cache file.';
+$_['error_mp_products_api']     = 'Could not fetch MerchantPro products via API or cache file.';
 
 // Columns (labels)
 $_['col_product']       = 'Product';

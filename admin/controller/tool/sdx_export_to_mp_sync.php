@@ -11,36 +11,7 @@ class ControllerToolSdxExportToMpSync extends Controller {
         $this->document->setTitle($this->language->get('heading_title'));
         
         $this->load->model('setting/setting');
-        $this->load->model('tool/image');
         $this->load->model('tool/sdx_export_to_mp_sync');
-        
-        // Save / Delete settings
-        if ($this->request->server['REQUEST_METHOD'] == 'POST') {
-            if (!isset($this->request->post['sdx_export_to_mp_sync_module'])) {
-                // delete settings when module key not included
-                if ($this->validate()) {
-                    $this->model_setting_setting->editSetting('sdx_export_to_mp_sync', array());
-                    $this->session->data['success'] = $this->language->get('text_success_saved');
-                    $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
-                }
-            } else {
-                // save settings (module presence + api array)
-                if ($this->validate()) {
-                    $save = array(
-                        'sdx_export_to_mp_sync_module' => $this->request->post['sdx_export_to_mp_sync_module'],
-                        'sdx_export_to_mp_sync_api'    => isset($this->request->post['sdx_export_to_mp_sync_api']) ? $this->request->post['sdx_export_to_mp_sync_api'] : array()
-                    );
-                    $this->model_setting_setting->editSetting('sdx_export_to_mp_sync', $save);
-                    $this->session->data['success'] = $this->language->get('text_success_saved');
-                    $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
-                }
-            }
-        }
-        
-        $this->getList();
-    }
-    
-    public function getList() {
         
         $url = '';
         
@@ -84,7 +55,8 @@ class ControllerToolSdxExportToMpSync extends Controller {
         
         $this->data['text_current_mp_feed']     = $this->language->get('text_current_mp_feed');
         $this->data['text_no_mp_feed']          = $this->language->get('text_no_mp_feed');
-        $this->data['text_mp_feed_update']      = $this->language->get('text_mp_feed_update');
+        
+        $this->data['text_mp_update_needed']      = $this->language->get('text_mp_update_needed');
         
         $this->data['button_export']            = $this->language->get('button_export');
         $this->data['button_filter']            = $this->language->get('button_filter');
@@ -174,8 +146,15 @@ class ControllerToolSdxExportToMpSync extends Controller {
         // "original list" only for base products
         //$results = $this->model_tool_sdx_export_to_mp_sync->getProducts($filter);
         
-        $products = $this->model_tool_sdx_export_to_mp_sync->checkOCagainstMP($filter);
-        if(!empty($products['error'])) { $this->session->data['error'] = $products['error']; }
+        //$products = $this->model_tool_sdx_export_to_mp_sync->checkOCagainstMP($filter);
+        $products = $this->model_tool_sdx_export_to_mp_sync->checkOCagainstMPapi($filter);
+        if(!empty($products['error'])) { 
+            if(isset($this->session->data['error'])){
+                $this->session->data['error'] .= '<br>'.$products['error'];
+            } else {
+                $this->session->data['error'] = $products['error'];
+            }
+        }
         //if(!empty($products['success'])) { $this->session->data['success'] = 'all set!'; }
         $this->load->model('tool/image');
         $no_image = file_exists(DIR_IMAGE . 'no_image.jpg') ? HTTPS_CATALOG.'image/no_image.jpg' : (file_exists(DIR_IMAGE . 'no_image.png') ? HTTPS_CATALOG.'image/no_image.png' : '');
@@ -214,11 +193,28 @@ class ControllerToolSdxExportToMpSync extends Controller {
             );
         }
         
-        // URL (for form to post) for the apply MP API endpoint for products (used by all per-product buttons or batch action)
-        $this->data['apply_mp_products_sync'] = $this->url->link('tool/sdx_export_to_mp_sync/applyMpProductsSync', 'token=' . $this->session->data['token'], 'SSL');
-        
         $current_date = new DateTime(); // Current date and time
         $current_date = $current_date->format('Y-m-d H:i:s'); // formated current date and time
+        
+        if (!empty($products['file']) && file_exists($products['file'])) {
+                    $mpprods_date = date('Y-m-d H:i:s', strtotime('+3 hours', filemtime($products['file']))); // mp products api cache date and time
+                    $this->data['mpprodsdate'] = ' at <b>'.$mpprods_date.' (+3h)</b> vs. now <b>'.$current_date.'</b>';
+                    if ($mpprods_date < $current_date) {
+                        $this->data['updatempprods'] = true;
+                    } else {
+                        $this->data['updatempprods'] = false;
+                    }
+                    $this->data['mpproducts_file'] = $products['file'];
+                    $this->data['mpproducts_source'] = 'Merchantpro Products from Local Cache';
+        } else { 
+            $this->data['updatempprods'] = true; 
+            $this->data['mpprodsdate'] = 'no date for MP API products'; 
+            $this->data['mpproducts_file'] = 'MerchantPro Products API/cache failed';
+            $this->data['mpproducts_source'] = 'none -> MP Products API/cache failed';
+        }
+        
+        // URL (for form to post) for the apply MP API endpoint for products (used by all per-product buttons or batch action)
+        $this->data['apply_mp_products_sync'] = $this->url->link('tool/sdx_export_to_mp_sync/applyMpProductsSync', 'token=' . $this->session->data['token'], 'SSL');
         
         // get latest MP xlsx files
         $xlsxfilepaths = $this->model_tool_sdx_export_to_mp_sync->getLatestXLSXFeedFiles();
@@ -255,7 +251,7 @@ class ControllerToolSdxExportToMpSync extends Controller {
         $this->data['mpcategories_delete_only']     = $sync['mp_only'];
         $this->data['mpcategories_total']           = $sync['mp_total'];
         $this->data['mpcategories_cache']           = !empty($sync['mp_cache']) ? $sync['mp_cache'] : 'none -> error!'; // full path of local cache file for MP categories (empty or not - just the file or none -> error)
-        $this->data['mpcategories_source']          = !empty($sync['mp_source']) ? $sync['mp_source'] : 'none -> MP API/cache failed'; // info txt about MP Categories source (API, Cache or none -> fail/error)
+        $this->data['mpcategories_source']          = !empty($sync['mp_source']) ? $sync['mp_source'] : 'none -> MP Categories API/cache failed'; // info txt about MP Categories source (API, Cache or none -> fail/error)
         $this->data['mpcategories_file']            = !empty($sync['mp_file']) ? $sync['mp_file'] : (!empty($sync['mp_source']) ? 'MerchantPro Categories API' : 'MerchantPro Categories API/cache failed'); // full path of local cache file for MP categories, only if cache file was used
         
         $this->data['mpcategories_patch_items']     = $sync['patch_items'];
@@ -271,7 +267,7 @@ class ControllerToolSdxExportToMpSync extends Controller {
                     } else {
                         $this->data['updatempcats'] = false;
                     }
-        } else { $this->data['updatempcats'] = true; $this->data['mpcatsdate'] = 'no date for MP categories'; }
+        } else { $this->data['updatempcats'] = true; $this->data['mpcatsdate'] = 'no date for MP API categories'; }
         
         // URL (for form to post) for the apply MP API endpoint for categories (used by all per-category buttons or batch action)
         $this->data['apply_mp_categories_sync'] = $this->url->link('tool/sdx_export_to_mp_sync/applyMpCategoriesSync', 'token=' . $this->session->data['token'], 'SSL');
@@ -286,7 +282,14 @@ class ControllerToolSdxExportToMpSync extends Controller {
                     } else {
                         $this->data['updatemptaxes'] = false;
                     }
-        } else { $this->data['updatemptaxes'] = true; $this->data['mptaxdate'] = 'no date for MP taxes'; }
+                    $this->data['mptaxes_file'] = $mptaxes['file'];
+                    $this->data['mptaxes_source'] = 'Merchantpro Taxonomies from Local Cache';
+        } else { 
+            $this->data['updatemptaxes'] = true; 
+            $this->data['mptaxdate'] = 'no date for MP API taxonomies';
+            $this->data['mptaxes_file'] = 'MerchantPro Taxonomies API/cache failed';
+            $this->data['mptaxes_source'] = 'none -> MP Taxonomies API/cache failed';
+        }
         
         // export url (placeholder)
         $this->data['export'] = $this->url->link('tool/sdx_export_to_mp_sync/export', 'token=' . $this->session->data['token'], 'SSL');
@@ -406,6 +409,34 @@ class ControllerToolSdxExportToMpSync extends Controller {
         $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
     }
     
+    public function APIsettings() {
+        //..
+        $this->load->language('tool/sdx_export_to_mp_sync');
+        $this->load->model('setting/setting');
+        
+        // Save / Delete settings
+        if ($this->request->server['REQUEST_METHOD'] == 'POST') {
+            if (!isset($this->request->post['sdx_export_to_mp_sync_module'])) {
+                // delete settings when module key not included
+                if ($this->validate()) {
+                    $this->model_setting_setting->editSetting('sdx_export_to_mp_sync', array());
+                    $this->session->data['success'] = $this->language->get('text_success_saved');
+                    $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
+                }
+            } else {
+                // save settings (module presence + api array)
+                if ($this->validate()) {
+                    $save = array(
+                        'sdx_export_to_mp_sync_module' => $this->request->post['sdx_export_to_mp_sync_module'],
+                        'sdx_export_to_mp_sync_api'    => isset($this->request->post['sdx_export_to_mp_sync_api']) ? $this->request->post['sdx_export_to_mp_sync_api'] : array()
+                    );
+                    $this->model_setting_setting->editSetting('sdx_export_to_mp_sync', $save);
+                    $this->session->data['success'] = $this->language->get('text_success_saved');
+                    $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
+                }
+            }
+        }
+    }
     // validate for permisions and important MP API settings/credentials
     private function validate() {
         
@@ -422,39 +453,6 @@ class ControllerToolSdxExportToMpSync extends Controller {
         }
         
         return !$this->error;
-    }
-    
-    // test or fallback if need when API throw error
-    public function APIerror() {
-        
-        $this->document->setTitle('MerchantPro API Settings');
-        $this->data['heading_title'] = 'MerchantPro API Settings';
-        
-        $this->load->model('setting/setting');
-        
-        if (isset($this->session->data['error'])) {
-            $this->data['error_warning'] = $this->session->data['error'];
-            unset($this->session->data['error']);
-        } else {
-            $this->data['error_warning'] = '';
-        }
-        
-        // token
-        $this->data['token'] = $this->session->data['token'];
-        
-        // load saved settings for Settings tab
-        $settings = $this->model_setting_setting->getSetting('sdx_export_to_mp_sync');
-        $api = isset($settings['sdx_export_to_mp_sync_api']) ? $settings['sdx_export_to_mp_sync_api'] : array();
-        $module_flag = isset($settings['sdx_export_to_mp_sync_module']) ? $settings['sdx_export_to_mp_sync_module'] : '';
-        // settings (for Settings tab)
-        $this->data['api'] = $api;
-        $this->data['module_flag'] = $module_flag;
-        
-        
-        $this->template = 'tool/sdx_export_to_mp_sync_api_error.tpl';
-        $this->children = array('common/header', 'common/footer');
-        
-        $this->response->setOutput($this->render());
     }
     
     // === MP API helpers ===
@@ -779,65 +777,110 @@ class ControllerToolSdxExportToMpSync extends Controller {
         );
     }
     
-// === MP API: get ALL products (with pagination) + optional JSON cache ===
-private function mpGetAllProducts($writeFile = true) {
-    $set = $this->mpApiSettings();
-    
-    // Cache path -> find latest json cache file (pattern)
-    //$cachepattern = DIR_LOGS . $set['store_slug'] . '_mp-export_all-products-cache_*.json';
-    $cachepattern = DIR_LOGS . $set['store_slug'] . '_mp-export_api-products-cache_*.json';
-    $cachefiles   = glob($cachepattern);
-    
-    $cachefile = null;
-    
-    if ($cachefiles) {
-        // newest first
-        usort($cachefiles, function($a, $b) {
-            return filemtime($b) - filemtime($a);
-        });
-        $cachefile = $cachefiles[0];
-    } else {
-        //$cachefile = DIR_LOGS . $set['store_slug'] . '_mp-export_all-products-cache_' . date('Y-m-d') . '.json';
-        $cachefile = DIR_LOGS . $set['store_slug'] . '_mp-export_api-products-cache_' . date('Y-m-d') . '.json';
-    }
-    
-    // If we are NOT forcing refresh and have an existing cache file, try to use it
-    if (is_file($cachefile) && !$writeFile) {
-        $cachedata = file_get_contents($cachefile);
-        $rawdata   = json_decode($cachedata, true);
+    // === MP API: get ALL products (with pagination) + optional JSON cache ===
+    private function mpGetAllProducts($writeFile = true) {
+        $set = $this->mpApiSettings();
         
-        if (is_array($rawdata) && isset($rawdata['json']) && isset($rawdata['json']['data'])) {
-            // Old XLSX-based file may have different structure – if so, just ignore and rebuild.
-            // Here we assume it's already in the mpFetchAll format we are writing below.
+        // Cache path -> find latest json cache file (pattern)
+        //$cachepattern = DIR_LOGS . $set['store_slug'] . '_mp-export_all-products-cache_*.json';
+        $cachepattern = DIR_LOGS . $set['store_slug'] . '_mp-export_api-products-cache_*.json';
+        $cachefiles   = glob($cachepattern);
+        
+        $cachefile = null;
+        
+        if ($cachefiles) {
+            // newest first
+            usort($cachefiles, function($a, $b) {
+                return filemtime($b) - filemtime($a);
+            });
+            $cachefile = $cachefiles[0];
+        } else {
+            //$cachefile = DIR_LOGS . $set['store_slug'] . '_mp-export_all-products-cache_' . date('Y-m-d') . '.json';
+            $cachefile = DIR_LOGS . $set['store_slug'] . '_mp-export_api-products-cache_' . date('Y-m-d') . '.json';
+        }
+        
+        // If we are NOT forcing refresh and have an existing cache file, try to use it
+        if (is_file($cachefile) && !$writeFile) {
+            $cachedata = file_get_contents($cachefile);
+            $rawdata   = json_decode($cachedata, true);
+            
+            if (is_array($rawdata) && isset($rawdata['json']) && isset($rawdata['json']['data'])) {
+                // Old XLSX-based file may have different structure – if so, just ignore and rebuild.
+                // Here we assume it's already in the mpFetchAll format we are writing below.
+                return array(
+                    'success'      => true,
+                    'source'       => $cachefile,
+                    'meta'         => isset($rawdata['json']['meta']) ? $rawdata['json']['meta'] : array(),
+                    'total'        => isset($rawdata['json']['meta']['items']) ? (int)$rawdata['json']['meta']['items'] : count($rawdata['json']['data']),
+                    'mp_products'  => $rawdata['json']['data'],
+                    //'mp_prodcache' => true,
+                    'mp_prodcache' => $cachefile,
+                    'error'         => null
+                );
+            }
+            // If structure is not what we expect -> fall-through and rebuild from API
+        }
+        
+        // --- Build from API using mpFetchAll ---
+        $resp = array();
+        $resp['generated_at'] = date('c');
+        
+        try {
+            // You can refine fields later; for now we let API return the usual product summary
+            // and side-load variants (if needed) in one go.
+            $records = $this->mpFetchAll('/api/v2/products', array(
+                'limit'   => 100,              // MP max = 100
+                'include' => 'variants',       // add ',images' if you want images
+                // 'status'  => 'active',      // uncomment if you want active only
+                'fields'  => 'id,type,sku,ext_ref,name,stock,price_net,price_gross,old_price_gross,old_price_net,inventory_enabled,status,category_id,category_name,categories'
+            ));
+            
+            if(!isset($records['json']) || !empty($records['error'])) {
+                return array(
+                    'success' => false,
+                    'source' => 'none',
+                    'meta' => 'none',
+                    'total' => 0,
+                    'mp_products' => array(),
+                    'mp_prodcache' => $cachefile,
+                    'error' => 'API error for MP Products <br> -> '.$records['error']
+                );
+            }
+            
+            // Optionally normalize some numeric fields
+            //if (isset($records['json']['data']) && is_array($records['json']['data'])) {
+            //    foreach ($records['json']['data'] as &$r) {
+            //        if (isset($r['id']))        $r['id']        = (int)$r['id'];
+            //        if (isset($r['category_id'])) $r['category_id'] = (int)$r['category_id'];
+            //        if (isset($r['tax_id']))    $r['tax_id']    = (int)$r['tax_id'];
+            //        if (isset($r['stock']))     $r['stock']     = (float)$r['stock'];
+            //    }
+            //    unset($r);
+            //}
+            
+            $resp = array_merge($resp, $records);
+            
+            //if ($writeFile) {
+                // delete any existing api-products-cache json files for this store_slug
+                if ($cachefiles) { foreach ($cachefiles as $df) { @unlink($df); } }
+                file_put_contents($cachefile, json_encode($resp, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+            //}
+            
             return array(
                 'success'      => true,
-                'source'       => $cachefile,
-                'meta'         => isset($rawdata['json']['meta']) ? $rawdata['json']['meta'] : array(),
-                'total'        => isset($rawdata['json']['meta']['items']) ? (int)$rawdata['json']['meta']['items'] : count($rawdata['json']['data']),
-                'mp_products'  => $rawdata['json']['data'],
-                //'mp_prodcache' => true,
+                'source'       => isset($resp['json']['meta']['links']['current'])
+                                    ? $resp['json']['meta']['links']['current']
+                                    : $cachefile,
+                'meta'         => isset($resp['json']['meta']) ? $resp['json']['meta'] : array(),
+                'total'        => isset($resp['json']['meta']['items']) ? (int)$resp['json']['meta']['items']
+                                                                         : (isset($resp['json']['data']) ? count($resp['json']['data']) : 0),
+                'mp_products'  => isset($resp['json']['data']) ? $resp['json']['data'] : array(),
+                //'mp_prodcache' => false,
                 'mp_prodcache' => $cachefile,
-                'error'         => null
+                'error' => null
             );
-        }
-        // If structure is not what we expect -> fall-through and rebuild from API
-    }
-    
-    // --- Build from API using mpFetchAll ---
-    $resp = array();
-    $resp['generated_at'] = date('c');
-    
-    try {
-        // You can refine fields later; for now we let API return the usual product summary
-        // and side-load variants (if needed) in one go.
-        $records = $this->mpFetchAll('/api/v2/products', array(
-            'limit'   => 100,              // MP max = 100
-            'include' => 'variants',       // add ',images' if you want images
-            // 'status'  => 'active',      // uncomment if you want active only
-            'fields'  => 'id,type,sku,ext_ref,name,stock,price_net,price_gross,old_price_gross,old_price_net,inventory_enabled,status,category_id,category_name,categories'
-        ));
-        
-        if(!isset($records['json']) || !empty($records['error'])) {
+            
+        } catch (Exception $e) {
             return array(
                 'success' => false,
                 'source' => 'none',
@@ -845,100 +888,55 @@ private function mpGetAllProducts($writeFile = true) {
                 'total' => 0,
                 'mp_products' => array(),
                 'mp_prodcache' => $cachefile,
-                'error' => 'API error for MP Products <br> -> '.$records['error']
+                'error' => 'API error for MP Products <br> -> '.$e->getMessage()
             );
         }
-        
-        // Optionally normalize some numeric fields
-        //if (isset($records['json']['data']) && is_array($records['json']['data'])) {
-        //    foreach ($records['json']['data'] as &$r) {
-        //        if (isset($r['id']))        $r['id']        = (int)$r['id'];
-        //        if (isset($r['category_id'])) $r['category_id'] = (int)$r['category_id'];
-        //        if (isset($r['tax_id']))    $r['tax_id']    = (int)$r['tax_id'];
-        //        if (isset($r['stock']))     $r['stock']     = (float)$r['stock'];
-        //    }
-        //    unset($r);
-        //}
-        
-        $resp = array_merge($resp, $records);
-        
-        //if ($writeFile) {
-            // delete any existing api-products-cache json files for this store_slug
-            if ($cachefiles) { foreach ($cachefiles as $df) { @unlink($df); } }
-            file_put_contents($cachefile, json_encode($resp, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
-        //}
-        
-        return array(
-            'success'      => true,
-            'source'       => isset($resp['json']['meta']['links']['current'])
-                                ? $resp['json']['meta']['links']['current']
-                                : $cachefile,
-            'meta'         => isset($resp['json']['meta']) ? $resp['json']['meta'] : array(),
-            'total'        => isset($resp['json']['meta']['items']) ? (int)$resp['json']['meta']['items']
-                                                                     : (isset($resp['json']['data']) ? count($resp['json']['data']) : 0),
-            'mp_products'  => isset($resp['json']['data']) ? $resp['json']['data'] : array(),
-            //'mp_prodcache' => false,
-            'mp_prodcache' => $cachefile,
-            'error' => null
-        );
-        
-    } catch (Exception $e) {
-        return array(
-            'success' => false,
-            'source' => 'none',
-            'meta' => 'none',
-            'total' => 0,
-            'mp_products' => array(),
-            'mp_prodcache' => $cachefile,
-            'error' => 'API error for MP Products <br> -> '.$e->getMessage()
-        );
     }
-}
-
-public function buildMPallProductsCache() {
-    $this->load->language('tool/sdx_export_to_mp_sync');
-    $this->load->model('setting/setting');
-    $this->load->model('tool/sdx_export_to_mp_sync');
-
-    $set = $this->mpApiSettings();
-
-    if (!$this->user->hasPermission('modify', 'tool/sdx_export_to_mp_sync')) {
-        $this->session->data['error'] = $this->language->get('error_permission');
+    
+    public function buildMPallProductsCache() {
+        $this->load->language('tool/sdx_export_to_mp_sync');
+        $this->load->model('setting/setting');
+        $this->load->model('tool/sdx_export_to_mp_sync');
+        
+        $set = $this->mpApiSettings();
+        
+        if (!$this->user->hasPermission('modify', 'tool/sdx_export_to_mp_sync')) {
+            $this->session->data['error'] = $this->language->get('error_permission');
+            $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
+        }
+        
+        try {
+            
+            $prods = $this->mpGetAllProducts(); // use false to read the cache or true/empty to write cache
+            
+            if (!empty($prods['success'])) {
+                $total = (int)$prods['total'];
+                
+                // Reuse your existing text_json_prepared if you like, or just hardcode text
+                if ($this->language->get('text_json_prepared')) {
+                    $this->session->data['success'] = sprintf(
+                        $this->language->get('text_json_prepared'),
+                        'The MP API call for Products returned',
+                        $total,
+                        'in DIR_LOGS: ' . $set['store_slug'] . '_mp-export_api-products-cache_*.json'
+                    );
+                } else {
+                    $this->session->data['success'] =
+                        'The MP API call for Products returned ' . $total .
+                        ' rows. Cache file: ' . $set['store_slug'] . '_mp-export_api-products-cache_*.json';
+                }
+                
+            } else {
+                $msg = !empty($prods['error']) ? $prods['error'] : 'Unknown error while building MP products cache.';
+                $this->session->data['error'] = 'MP Products cache error: ' . $msg;
+            }
+        
+        } catch (Exception $e) {
+            $this->session->data['error'] = 'The MP API call for Products failed: ' . $e->getMessage();
+        }
+        
         $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
     }
-
-    try {
-        
-        $prods = $this->mpGetAllProducts(); // use false to read the cache or true/empty to write cache
-
-        if (!empty($prods['success'])) {
-            $total = (int)$prods['total'];
-
-            // Reuse your existing text_json_prepared if you like, or just hardcode text
-            if ($this->language->get('text_json_prepared')) {
-                $this->session->data['success'] = sprintf(
-                    $this->language->get('text_json_prepared'),
-                    'The MP API call for Products returned',
-                    $total,
-                    'in DIR_LOGS: ' . $set['store_slug'] . '_mp-export_api-products-cache_*.json'
-                );
-            } else {
-                $this->session->data['success'] =
-                    'The MP API call for Products returned ' . $total .
-                    ' rows. Cache file: ' . $set['store_slug'] . '_mp-export_api-products-cache_*.json';
-            }
-
-        } else {
-            $msg = !empty($prods['error']) ? $prods['error'] : 'Unknown error while building MP products cache.';
-            $this->session->data['error'] = 'MP Products cache error: ' . $msg;
-        }
-
-    } catch (Exception $e) {
-        $this->session->data['error'] = 'The MP API call for Products failed: ' . $e->getMessage();
-    }
-
-    $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
-}
     
     // get and create MP categories cache
     private function mpGetAllCategories($writeFile = true) {
@@ -1161,9 +1159,9 @@ public function buildMPallProductsCache() {
         if (empty($mpcategories['success'])) {
             //throw new Exception('Could not fetch MerchantPro categories.');
             if(isset($this->session->data['error'])){
-                $this->session->data['error'] .= '<br> Could not fetch MerchantPro categories via API or cache file.'.(isset($mpcategories['error']) ? '<br>'.$mpcategories['error'] : '');
+                $this->session->data['error'] .= '<br>'.$this->language->get('error_mp_categories_api').(isset($mpcategories['error']) ? '<br>'.$mpcategories['error'] : '');
             } else {
-                $this->session->data['error'] = 'Could not fetch MerchantPro categories via API or cache file.'.(isset($mpcategories['error']) ? '<br>'.$mpcategories['error'] : '');
+                $this->session->data['error'] = $this->language->get('error_mp_categories_api').(isset($mpcategories['error']) ? '<br>'.$mpcategories['error'] : '');
             }
             
         }
@@ -1628,7 +1626,7 @@ public function buildMPallProductsCache() {
             'mp_json_files'     => $mpjsonfiles,
         );
     }
-
+    
     // MP API actions/sync for categories
     public function applyMpCategoriesSync() {
         $this->load->language('tool/sdx_export_to_mp_sync');
@@ -1973,7 +1971,7 @@ public function buildMPallProductsCache() {
             }
             
             if ($units['status'] >= 200 && $units['status'] < 300) {
-                    $successDetails[] = $units['source'].' for MP Taxes updated (HTTP '.$units['status'].'), '.count($units['json']).' items in DIR_LOGS: '.$set['store_slug'].'_mp-export_units-cache_*.json ';
+                    $successDetails[] = $units['source'].' for MP Units updated (HTTP '.$units['status'].'), '.count($units['json']).' items in DIR_LOGS: '.$set['store_slug'].'_mp-export_units-cache_*.json ';
             } else {
                     $errorDetails[] = 'GET try for MP Units taxonomy failed: API responded HTTP '.$units['status'].' -> '.(!empty($units['error']) ? $units['error'] : '');
             }
@@ -2001,206 +1999,206 @@ public function buildMPallProductsCache() {
     }
     
     // MP API actions/sync for products
-public function applyMpProductsSync() {
-    $this->load->language('tool/sdx_export_to_mp_sync');
-    $this->load->model('setting/setting');
-    $this->load->model('tool/sdx_export_to_mp_sync');
-
-    if (!$this->user->hasPermission('modify', 'tool/sdx_export_to_mp_sync')) {
-        $this->session->data['error'] = $this->language->get('error_permission');
-        $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
-    }
-    
-    // Expected: product_action = patch|post (delete optional)
-    $action = isset($this->request->post['product_action']) ? strtolower($this->request->post['product_action']) : '';
-    if (!in_array($action, array('patch', 'post', 'delete'))) {
-        $this->session->data['error'] = 'Unknown products sync action: ' . $action;
-        $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
-    }
-    
-    // Helper: get a single ID from POST (force button) or multiple (batch)
-    //$getIds = function($singleKey, $multiKey) {
-    //    $ids = array();
-    //    if (!empty($this->request->post[$singleKey])) {
-    //        $ids[] = (int)$this->request->post[$singleKey];
-    //    } elseif (!empty($this->request->post[$multiKey]) && is_array($this->request->post[$multiKey])) {
-    //        foreach ($this->request->post[$multiKey] as $id) {
-    //            $ids[] = (int)$id;
-    //        }
-    //    }
-    //    return $ids;
-    //};
-
-    // Collect product IDs:
-    //  - single "force" button: oc_product_id
-    //  - batch (checkboxes):    oc_product_ids[]
-    $product_ids = array();
-    if (!empty($this->request->post['oc_product_id'])) {
-        $product_ids[] = (int)$this->request->post['oc_product_id'];
-    }
-    if (!empty($this->request->post['oc_product_ids']) && is_array($this->request->post['oc_product_ids'])) {
-        foreach ($this->request->post['oc_product_ids'] as $pid) {
-            $pid = (int)$pid;
-            if ($pid > 0) {
-                $product_ids[] = $pid;
+    public function applyMpProductsSync() {
+        $this->load->language('tool/sdx_export_to_mp_sync');
+        $this->load->model('setting/setting');
+        $this->load->model('tool/sdx_export_to_mp_sync');
+        
+        if (!$this->user->hasPermission('modify', 'tool/sdx_export_to_mp_sync')) {
+            $this->session->data['error'] = $this->language->get('error_permission');
+            $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
+        }
+        
+        // Expected: product_action = patch|post (delete optional)
+        $action = isset($this->request->post['product_action']) ? strtolower($this->request->post['product_action']) : '';
+        if (!in_array($action, array('patch', 'post', 'delete'))) {
+            $this->session->data['error'] = 'Unknown products sync action: ' . $action;
+            $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
+        }
+        
+        // Helper: get a single ID from POST (force button) or multiple (batch)
+        //$getIds = function($singleKey, $multiKey) {
+        //    $ids = array();
+        //    if (!empty($this->request->post[$singleKey])) {
+        //        $ids[] = (int)$this->request->post[$singleKey];
+        //    } elseif (!empty($this->request->post[$multiKey]) && is_array($this->request->post[$multiKey])) {
+        //        foreach ($this->request->post[$multiKey] as $id) {
+        //            $ids[] = (int)$id;
+        //        }
+        //    }
+        //    return $ids;
+        //};
+        
+        // Collect product IDs:
+        //  - single "force" button: oc_product_id
+        //  - batch (checkboxes):    oc_product_ids[]
+        $product_ids = array();
+        if (!empty($this->request->post['oc_product_id'])) {
+            $product_ids[] = (int)$this->request->post['oc_product_id'];
+        }
+        if (!empty($this->request->post['oc_product_ids']) && is_array($this->request->post['oc_product_ids'])) {
+            foreach ($this->request->post['oc_product_ids'] as $pid) {
+                $pid = (int)$pid;
+                if ($pid > 0) {
+                    $product_ids[] = $pid;
+                }
             }
         }
-    }
-    $product_ids = array_values(array_unique($product_ids));
-    
-    if (!$product_ids) {
-        $this->session->data['error'] = 'No products selected for MP sync.';
-        $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
-    }
-    
-    $ok                  = 0;
-    $fail                = 0;
-    $skipped_missing_cat = 0;
-    $errorDetails        = array();
-    
-    foreach ($product_ids as $product_id) {
+        $product_ids = array_values(array_unique($product_ids));
         
-        // 1) Build OC-side base row for this product
-        $ocproduct = $this->model_tool_sdx_export_to_mp_sync->getOcProductRowForMp($product_id);
-        
-        if (!$ocproduct) {
-            $fail++;
-            $errorDetails[] = 'OC product ID ' . $product_id . ' not found or not suitable for MP sync.';
-            continue;
+        if (!$product_ids) {
+            $this->session->data['error'] = 'No products selected for MP sync.';
+            $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
         }
         
-        // 2) Build MP payload via getProductDetailsForMP()
-        $details = $this->model_tool_sdx_export_to_mp_sync->getProductDetailsForMP($ocproduct);
+        $ok                  = 0;
+        $fail                = 0;
+        $skipped_missing_cat = 0;
+        $errorDetails        = array();
         
-        if (empty($details['product']) || !is_array($details['product'])) {
-            $fail++;
-            $msg = !empty($details['error']) ? $details['error'] : 'Unknown error from getProductDetailsForMP';
-            $errorDetails[] = 'Product ID ' . $product_id . ': ' . $msg;
-            continue;
-        }
-        
-        $mpPayload         = $details['product'];
-        
-        $missingCategories = !empty($details['missing_categories']) && is_array($details['missing_categories'])
-            ? $details['missing_categories']
-            : array();
-        
-        // 3) If there are unmapped categories, skip to avoid sending incomplete category mapping
-        if (!empty($missingCategories)) {
-            $skipped_missing_cat++;
-            $errorDetails[] = 'Product ID ' . $product_id . ' skipped: missing MP mapping for OC categories: ' . implode(', ', $missingCategories);
-            continue;
-        }
-        
-        // 4) Decide POST vs PATCH vs DELETE
-        $resp = null;
-        
-        if ($action === 'patch') {
-            // Need an existing MP product id
-            if (empty($mpPayload['id'])) {
+        foreach ($product_ids as $product_id) {
+            
+            // 1) Build OC-side base row for this product
+            $ocproduct = $this->model_tool_sdx_export_to_mp_sync->getOcProductRowForMp($product_id);
+            
+            if (!$ocproduct) {
                 $fail++;
-                $errorDetails[] = 'PATCH product ID ' . $product_id . ' skipped: no MP product ID (id) present.';
+                $errorDetails[] = 'OC product ID ' . $product_id . ' not found or not suitable for MP sync.';
                 continue;
             }
             
-            $mpId = (int)$mpPayload['id'];
+            // 2) Build MP payload via getProductDetailsForMP()
+            $details = $this->model_tool_sdx_export_to_mp_sync->getProductDetailsForMP($ocproduct);
             
-            // For PATCH we can keep or unset 'id' in the body; usually not required in payload.
-            unset($mpPayload['id']);
+            if (empty($details['product']) || !is_array($details['product'])) {
+                $fail++;
+                $msg = !empty($details['error']) ? $details['error'] : 'Unknown error from getProductDetailsForMP';
+                $errorDetails[] = 'Product ID ' . $product_id . ': ' . $msg;
+                continue;
+            }
             
-            $resp = $this->mpRequest(
-                'PATCH',
-                '/api/v2/products/' . $mpId,
-                array('ignore_nonexistent_fields' => 1),
-                $mpPayload
-            );
+            $mpPayload         = $details['product'];
             
-        } elseif ($action === 'post') {
-            // For POST we must not send id
-            if (isset($mpPayload['id'])) {
+            $missingCategories = !empty($details['missing_categories']) && is_array($details['missing_categories'])
+                ? $details['missing_categories']
+                : array();
+            
+            // 3) If there are unmapped categories, skip to avoid sending incomplete category mapping
+            if (!empty($missingCategories)) {
+                $skipped_missing_cat++;
+                $errorDetails[] = 'Product ID ' . $product_id . ' skipped: missing MP mapping for OC categories: ' . implode(', ', $missingCategories);
+                continue;
+            }
+            
+            // 4) Decide POST vs PATCH vs DELETE
+            $resp = null;
+            
+            if ($action === 'patch') {
+                // Need an existing MP product id
+                if (empty($mpPayload['id'])) {
+                    $fail++;
+                    $errorDetails[] = 'PATCH product ID ' . $product_id . ' skipped: no MP product ID (id) present.';
+                    continue;
+                }
+                
+                $mpId = (int)$mpPayload['id'];
+                
+                // For PATCH we can keep or unset 'id' in the body; usually not required in payload.
                 unset($mpPayload['id']);
+                
+                $resp = $this->mpRequest(
+                    'PATCH',
+                    '/api/v2/products/' . $mpId,
+                    array('ignore_nonexistent_fields' => 1),
+                    $mpPayload
+                );
+                
+            } elseif ($action === 'post') {
+                // For POST we must not send id
+                if (isset($mpPayload['id'])) {
+                    unset($mpPayload['id']);
+                }
+                
+                $resp = $this->mpRequest(
+                    'POST',
+                    '/api/v2/products',
+                    array('ignore_nonexistent_fields' => 1),
+                    $mpPayload
+                );
+                
+            } elseif ($action === 'delete') {
+                // Only allowed if we know MP id
+                if (empty($mpPayload['id'])) {
+                    $fail++;
+                    $errorDetails[] = 'DELETE product ID ' . $product_id . ' skipped: no MP product ID present.';
+                    continue;
+                }
+                
+                $mpId = (int)$mpPayload['id'];
+                
+                $resp = $this->mpRequest(
+                    'DELETE',
+                    '/api/v2/products/' . $mpId,
+                    array(),
+                    null
+                );
             }
             
-            $resp = $this->mpRequest(
-                'POST',
-                '/api/v2/products',
-                array('ignore_nonexistent_fields' => 1),
-                $mpPayload
-            );
-            
-        } elseif ($action === 'delete') {
-            // Only allowed if we know MP id
-            if (empty($mpPayload['id'])) {
+            if (!is_array($resp)) {
                 $fail++;
-                $errorDetails[] = 'DELETE product ID ' . $product_id . ' skipped: no MP product ID present.';
+                $errorDetails[] = 'MP API ' . strtoupper($action) . ' returned invalid response for Product ID ' . $product_id . ' .';
                 continue;
             }
             
-            $mpId = (int)$mpPayload['id'];
+            $status = isset($resp['status']) ? (int)$resp['status'] : 0;
             
-            $resp = $this->mpRequest(
-                'DELETE',
-                '/api/v2/products/' . $mpId,
-                array(),
-                null
+            if ($status >= 200 && $status < 300) {
+                $ok++;
+            } else {
+                $fail++;
+                
+                $msg = 'HTTP ' . $status;
+                // Try to extract MP API error message if present
+                if (!empty($resp['json']['message'])) {
+                    $msg .= ' -> ' . $resp['json']['message'];
+                } elseif (!empty($resp['json']['error'])) {
+                    $msg .= ' -> ' . $resp['json']['error'];
+                }
+                
+                $errorDetails[] = strtoupper($action) . ' product #' . $product_id . ': ' . $msg;
+            }
+        }
+        
+        // Build summary messages for UI
+        if ($fail === 0 && $skipped_missing_cat === 0) {
+            $this->session->data['success'] = sprintf(
+                'MP API %s was OK for %d products.',
+                strtoupper($action),
+                $ok
             );
-        }
-        
-        if (!is_array($resp)) {
-            $fail++;
-            $errorDetails[] = 'MP API ' . strtoupper($action) . ' returned invalid response for Product ID ' . $product_id . ' .';
-            continue;
-        }
-        
-        $status = isset($resp['status']) ? (int)$resp['status'] : 0;
-        
-        if ($status >= 200 && $status < 300) {
-            $ok++;
         } else {
-            $fail++;
+            $msg = sprintf(
+                'MP API %s was OK for %d products, but Failed for %d products and Skipped for %d products (due to missing categories).',
+                strtoupper($action),
+                $ok,
+                $fail,
+                $skipped_missing_cat
+            );
             
-            $msg = 'HTTP ' . $status;
-            // Try to extract MP API error message if present
-            if (!empty($resp['json']['message'])) {
-                $msg .= ' -> ' . $resp['json']['message'];
-            } elseif (!empty($resp['json']['error'])) {
-                $msg .= ' -> ' . $resp['json']['error'];
+            if (!empty($errorDetails)) {
+                // Avoid overloading the UI – show first few lines
+                $msg .= '<br>' . implode('<br>', array_slice($errorDetails, 0, 10));
             }
             
-            $errorDetails[] = strtoupper($action) . ' product #' . $product_id . ': ' . $msg;
+            $this->session->data['error'] = $msg;
         }
+        
+        // Finally, go back to tool main page
+        $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
     }
     
-    // Build summary messages for UI
-    if ($fail === 0 && $skipped_missing_cat === 0) {
-        $this->session->data['success'] = sprintf(
-            'MP API %s was OK for %d products.',
-            strtoupper($action),
-            $ok
-        );
-    } else {
-        $msg = sprintf(
-            'MP API %s was OK for %d products, but Failed for %d products and Skipped for %d products (due to missing categories).',
-            strtoupper($action),
-            $ok,
-            $fail,
-            $skipped_missing_cat
-        );
-
-        if (!empty($errorDetails)) {
-            // Avoid overloading the UI – show first few lines
-            $msg .= '<br>' . implode('<br>', array_slice($errorDetails, 0, 10));
-        }
-
-        $this->session->data['error'] = $msg;
-    }
-
-    // Finally, go back to tool main page
-    $this->redirect($this->url->link('tool/sdx_export_to_mp_sync', 'token=' . $this->session->data['token'], 'SSL'));
-}
-
     
-    // Phase 2.x - skeleton for sending products to MP API
+    // skeletons
     // called by template's JS when individual/batch product(s) are selected for import
     // returns a json encoded array, can be used otherwise
     public function exportProducts() {
