@@ -1,6 +1,6 @@
 <?php
 
-/* v1.5 model SDxExportToMPSync */
+/* v1.5.3 model SDxExportToMPSync */
 
 class ModelToolSdxExportToMPSync extends Model {
     
@@ -197,19 +197,8 @@ class ModelToolSdxExportToMPSync extends Model {
         $local_feed_variants = DIR_LOGS . $store_slug . '_mp-export_feed-variants_' . date('Y-m-d') . '.xlsx';
         
         // download with cURL
-        try {
-            $this->downloadFile($feed_simple, $local_feed_simple);
-            $this->downloadFile($feed_variants, $local_feed_variants);
-        } catch (Exception $e) {
-            // Cleanup partial files (temp or current) before bailing out
-            $simple_tmp   = $local_feed_simple . '.tmp';
-            $variants_tmp = $local_feed_variants . '.tmp';
-            if (is_file($simple_tmp)) @unlink($simple_tmp);
-            if (is_file($variants_tmp)) @unlink($variants_tmp);
-            if (is_file($local_feed_simple)) @unlink($local_feed_simple);
-            if (is_file($local_feed_variants)) @unlink($local_feed_variants);
-            return array('success' => false, 'error' => 'Failed downloading feeds: ' . $e->getMessage());
-        }
+        $this->downloadFile($feed_simple, $local_feed_simple);
+        $this->downloadFile($feed_variants, $local_feed_variants);
         
         // parse XLSX feeds
         try {
@@ -520,6 +509,20 @@ class ModelToolSdxExportToMPSync extends Model {
         
         return array('success' => true, 'filename' => $filename, 'filepath' => $filepath, 'filesimple' => str_replace(DIR_LOGS, '', $local_feed_simple), 'filevariants' => str_replace(DIR_LOGS, '', $local_feed_variants));
     }
+    // download and save file from URL (used by updateMPfeed() to get the MP xlsx feeds for simple+variable and variants, but also for other downloads if needed)
+    protected function downloadFile($url, $dest) {
+        $ch = curl_init($url);
+        $fp = fopen($dest, 'w+');
+        curl_setopt($ch, CURLOPT_FILE, $fp);
+        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+        curl_setopt($ch, CURLOPT_TIMEOUT, 60); // 60s timeout
+        curl_exec($ch);
+        if (curl_errno($ch)) {
+            throw new Exception('Curl error: ' . curl_error($ch));
+        }
+        curl_close($ch);
+        fclose($fp);
+    }
     
     // Convert memory_limit to bytes - to allocate more memory as xlsx files are processed (large number of records)
     protected function memoryToBytes($val) {
@@ -541,7 +544,6 @@ class ModelToolSdxExportToMPSync extends Model {
         if (!$url) return '';
         return $this->deriveStoreSlugFromUrl($url);
     }
-    
     // Derive a short slug from a URL host: strip www., replace '.' with '-' 
     public function deriveStoreSlugFromUrl($url) {
         $host = parse_url($url, PHP_URL_HOST);
@@ -554,63 +556,6 @@ class ModelToolSdxExportToMPSync extends Model {
         $slug = str_replace('.', '-', $host);
         $slug = preg_replace('/[^A-Za-z0-9\-_]/', '', $slug);
         return strtolower($slug);
-    }
-    
-    // download and save file from URL (used to get the MP xlsx feeds for simple+variable and variants, but also for other downloads if needed)
-    protected function downloadFile($url, $dest) {
-        $tmpDest = $dest . '.tmp';
-        $fp = fopen($tmpDest, 'w+');
-        if (!$fp) {
-            throw new Exception('Unable to open destination file for writing: ' . $tmpDest);
-        }
-
-        $ch = curl_init($url);
-        if (!$ch) {
-            fclose($fp);
-            @unlink($tmpDest);
-            throw new Exception('Unable to initialize cURL for URL: ' . $url);
-        }
-
-        curl_setopt($ch, CURLOPT_FILE, $fp);
-        curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-        curl_setopt($ch, CURLOPT_TIMEOUT, 60); // 60s timeout
-        curl_setopt($ch, CURLOPT_FAILONERROR, false);
-        curl_setopt($ch, CURLOPT_RETURNTRANSFER, false);
-
-        $execResult = curl_exec($ch);
-        $errno      = curl_errno($ch);
-        $errstr     = curl_error($ch);
-        $status     = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-        curl_close($ch);
-        fflush($fp);
-        $bytesWritten = ftell($fp);
-        fclose($fp);
-
-        if ($errno) {
-            @unlink($tmpDest);
-            throw new Exception('Curl error: ' . $errstr);
-        }
-
-        if ($execResult === false) {
-            @unlink($tmpDest);
-            throw new Exception('Curl execution failed for URL: ' . $url);
-        }
-
-        if ($status < 200 || $status >= 300) {
-            @unlink($tmpDest);
-            throw new Exception('Unexpected HTTP status ' . $status . ' when downloading ' . $url);
-        }
-
-        if ($bytesWritten === 0) {
-            @unlink($tmpDest);
-            throw new Exception('Downloaded file is empty for URL: ' . $url);
-        }
-
-        if (!@rename($tmpDest, $dest)) {
-            @unlink($tmpDest);
-            throw new Exception('Unable to move downloaded file into place: ' . $dest);
-        }
     }
     
     // Get the latest MP xlsx files (consolidated and feeds with paths) or empty string
@@ -634,7 +579,6 @@ class ModelToolSdxExportToMPSync extends Model {
         //return basename($files[0]);
         return $filepaths;
     }
-    
     /* === end of get and update MerchantPro Consolidated Feed === */
     
     /**
@@ -775,7 +719,7 @@ class ModelToolSdxExportToMPSync extends Model {
         return $out;
     }
     
-    // get the lowest special price of OC product - to check the sync with MP
+    // helper: get the lowest special price of OC product - used to check the sync with MP
     protected function getProductLowestSpecial($product_id) {
         $lowest_special = null;
         $special_rows = $this->db->query("SELECT * FROM " . DB_PREFIX . "product_special WHERE product_id = '" . (int)$product_id . "' ORDER BY priority, price")->rows;
@@ -821,7 +765,7 @@ class ModelToolSdxExportToMPSync extends Model {
         return implode(' > ', array_filter($path));
     }
     
-    // product OC categories plain (no path)
+    // helper: get OC categories plain (no path)
     protected function getProductCategoriesPlain($product_id) {
         
         $sql = "SELECT cd.name FROM " . DB_PREFIX . "product_to_category pc
@@ -836,7 +780,7 @@ class ModelToolSdxExportToMPSync extends Model {
         
     }
     
-    // returns array of select-type options for product
+    // helper: returns array of select-type options for OC product
     protected function getProductSelectOptions($product_id) {
         $language_id = (int)$this->config->get('config_language_id');
         
@@ -884,7 +828,7 @@ class ModelToolSdxExportToMPSync extends Model {
         return $out;
     }
     
-    // builds a safe slug (ASCII, no spaces, dash separated, optionally lower-case) for variant suffixes 
+    // helper: builds a safe slug (ASCII, no spaces, dash separated, optionally lower-case) for variant suffixes 
     // example: "Alb Cald" -> "Alb-Cald" * Note: original case style is kept; for safety, diacritics are removed and spaces are replaced with '-'
     protected function slugifyForExtRef($text) {
         $text = trim((string)$text);
@@ -944,13 +888,13 @@ class ModelToolSdxExportToMPSync extends Model {
         $xlsx_mtime = filemtime($xlsxfile);
         
         // cache path -> find latest json cache file (pattern)
-        $cachepattern = DIR_LOGS . $store_slug . '_mp-export_all-products-cache_*.json';
+        $cachepattern = DIR_LOGS . $store_slug . '_mp-export_all-feed-products-cache_*.json';
         $cachefiles = glob($cachepattern);
         if ($cachefiles) {
             usort($cachefiles, function($cfa, $cfb) { return filemtime($cfb) - filemtime($cfa); });
             $cachefile = $cachefiles[0];
         } else {
-            $cachefile = DIR_LOGS . $store_slug . '_mp-export_all-products-cache_' . date('Y-m-d') . '.json';
+            $cachefile = DIR_LOGS . $store_slug . '_mp-export_all-feed-products-cache_' . date('Y-m-d') . '.json';
         }
         
         // if cache exists and fresh -> return it, else force rebuild
@@ -1131,7 +1075,7 @@ class ModelToolSdxExportToMPSync extends Model {
         // delete any existing $cachepattern json files
         $dfiles = glob($cachepattern);
         if ($dfiles) { foreach ($dfiles as $df) { @unlink($df); } }
-        $cachefile = DIR_LOGS . $store_slug . '_mp-export_all-products-cache_' . date('Y-m-d') . '.json';
+        $cachefile = DIR_LOGS . $store_slug . '_mp-export_all-feed-products-cache_' . date('Y-m-d') . '.json';
         // write $cachefile file atomically
         $tmp = $cachefile . '.tmp';
         file_put_contents($tmp, json_encode($cache, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT), LOCK_EX);
@@ -1217,6 +1161,8 @@ class ModelToolSdxExportToMPSync extends Model {
                 $oc_product['specials'] = $this->model_catalog_product->getProductSpecials($oc_product_id);
                 
                 $oc_product['mp_id'] = null;
+                
+                $oc_product['mp_product'] = null;
                 
                 $oc_product['mp_sync_status_code'] = 'no_feed'; // available $mp_sync_status_code: no_feed, missing, in_mp, in_mp_by_sku, collision, out_of_sync, price_stock_diff
                 $oc_product['mp_sync_status'] = $this->language->get('mp_status_no_feed');
@@ -1330,6 +1276,8 @@ class ModelToolSdxExportToMPSync extends Model {
                 
                 $oc_product['mp_id'] = $mp_product['mp_id'];
                 
+                $oc_product['mp_product'] = $mp_product;
+                
                 $oc_product['mp_sync_status_code'] = $mp_sync_status_code;
                 $oc_product['mp_sync_status'] = $mp_sync_status;
                 $oc_product['mp_sync_issues'] = $mp_sync_issues;
@@ -1342,6 +1290,8 @@ class ModelToolSdxExportToMPSync extends Model {
                 // oc products not found/matched within mp products - to be exported to mp via API POST
                 
                 $oc_product['mp_id'] = null;
+                
+                $oc_product['mp_product'] = null;
                 
                 $oc_product['mp_sync_status_code'] = 'missing';
                 $oc_product['mp_sync_status'] = $this->language->get('mp_status_missing');
@@ -1448,7 +1398,7 @@ class ModelToolSdxExportToMPSync extends Model {
         return array('success' => true, 'error' => false, 'oc' => $out);
         
     }
-    
+    // check OC products against MP api cache products // compare prices, stock, model vs sku, model_base vs sku_base, names
     public function checkOCagainstMPapi($filter = array()) {
         
         ///$store_slug = $this->getStoreSlug(); // however you currently build it
@@ -1509,13 +1459,14 @@ class ModelToolSdxExportToMPSync extends Model {
         // You could also decide to fallback when $cache_info['stale'] == true
         
         // 2. Build index by ext_ref
-        //$mpByExtRef = $this->buildMpIndexFromApiCache($api_cache);
-        $mp_products = $this->buildMpIndexFromApiCache($api_cache);
+        $mp_products = $this->normalizeMpProductsFromApiCache($api_cache, $store_slug); 
+        //$mp_products = $this->buildMpIndexFromApiCache($api_cache);
         $mpByExtRef = $mp_products['mp_extref'];
+        ///$mpByExtRef = $api_cache['mp_extref'];
         
         // 3. Build MP delete by MP ID
-        //$mp_delete = $this->buildMpDeleteFromApiCache($api_cache);
         $mp_delete = $mp_products['mp_delete'];
+        ///$mp_delete = $api_cache['mp_delete'];
         
         // 4. Load OC products (same as in checkOCagainstMP)
         //$oc_products = $this->getProductsForMpCheck($filter);
@@ -1651,6 +1602,8 @@ class ModelToolSdxExportToMPSync extends Model {
                 
                 $oc_product['mp_id'] = $mp_product['id'];
                 
+                $oc_product['mp_product'] = $mp_product;
+                
                 $oc_product['mp_sync_status_code']  = $mp_sync_status_code;
                 $oc_product['mp_sync_status']       = $mp_sync_status;
                 $oc_product['mp_matched_by']        = $mp_matched_by;
@@ -1687,6 +1640,8 @@ class ModelToolSdxExportToMPSync extends Model {
                     
                     $oc_product['mp_id'] = null;
                     
+                    $oc_product['mp_product'] = null;
+                    
                     $oc_product['mp_sync_status_code'] = 'missing';
                     $oc_product['mp_sync_status'] = $this->language->get('mp_status_missing');
                     $oc_product['mp_sync_issues'] = 'not_in_mp_feed';
@@ -1709,7 +1664,7 @@ class ModelToolSdxExportToMPSync extends Model {
                 $post[$ext_ref] = $entry;
             }
         }
-        
+        /*
         // delete any existing mp-import_products- json files for mp import
         $mppattern = DIR_LOGS . $store_slug . '_mp-import_products-*.json';
         $mpfiles = glob($mppattern);
@@ -1772,12 +1727,12 @@ class ModelToolSdxExportToMPSync extends Model {
         $tmp = $ocproductsfile . '.tmp';
         file_put_contents($tmp, json_encode($ocpreselectedcache, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT), LOCK_EX);
         @rename($tmp, $ocproductsfile);
-        
+        */
         return array('success' => true, 'error' => false, 'file' => $api_cache_file, 'stale' => $api_cache_stale, 'oc' => $out);
         //return $out;
     }
     
-    protected function loadMpApiProductsCache($store_slug, $max_age_hours = 24) {
+    public function loadMpApiProductsCache($store_slug, $max_age_hours = 24) {
         $path = $this->getLatestMpApiProductsCachePath($store_slug);
         if (!$path || !file_exists($path)) {
             return array('data' => array(), 'stale' => true, 'file' => null);
@@ -1798,6 +1753,7 @@ class ModelToolSdxExportToMPSync extends Model {
         return array('data' => $json, 'stale' => $stale, 'file' => $path);
     }
     protected function getLatestMpApiProductsCachePath($store_slug) {
+        //$pattern = DIR_LOGS . $store_slug . '_mp-export_all-api-products-cache_*.json';
         $pattern = DIR_LOGS . $store_slug . '_mp-export_api-products-cache_*.json';
         $files = glob($pattern);
         if (!$files) {
@@ -1812,7 +1768,8 @@ class ModelToolSdxExportToMPSync extends Model {
         return $files[0];
     }
     
-    protected function buildMpIndexFromApiCache(array $api_cache) {
+    // redundant? not needed when using normalized api cache for products
+    /*protected function buildMpIndexFromApiCache(array $api_cache) {
         $mpByExtRef = array();
         $mpDelete = array();
         $list = array();
@@ -1858,38 +1815,470 @@ class ModelToolSdxExportToMPSync extends Model {
         }
         
         return array('mp_extref' => $mpByExtRef, 'mp_delete' => $mpDelete);
-    }
-/*
-protected function buildMpDeleteFromApiCache(array $api_cache) {
-    $mpDelete = array();
-    $list = array();
-    
-    if (isset($api_cache['json']['data']) && is_array($api_cache['json']['data'])) {
-        $list = $api_cache['json']['data'];
-    } else {
-        $list = $api_cache; // if raw array of products
-    }
-    
-    foreach ($list as $row) {
+    }*/
+    protected function buildMpIndexFromApiCache(array $api_cache) {
+        $mpByExtRef = array();
+        $mpDelete   = array();
+        $list       = array();
         
-        if (!is_array($row)) continue;
-        
-        if ($row['ext_ref'] === null) {
-            $mp_id = $row['id'];
-            $mpDelete[$mp_id] = $row;
+        // --- Case 1: already normalized file (meta + mp_extref + mp_delete) ---
+        if (isset($api_cache['mp_extref']) || isset($api_cache['mp_delete'])) {
+            if (isset($api_cache['mp_extref']) && is_array($api_cache['mp_extref'])) {
+                $mpByExtRef = $api_cache['mp_extref'];
+            }
+            if (isset($api_cache['mp_delete']) && is_array($api_cache['mp_delete'])) {
+                $mpDelete = $api_cache['mp_delete'];
+            }
+            
+            return array(
+                'mp_extref' => $mpByExtRef,
+                'mp_delete' => $mpDelete
+            );
         }
         
-        if (isset($row['variants']['ext_ref']) && $row['variants']['ext_ref'] === null) {
-            $mp_id = $row['variants']['id'];
-            $mpDelete[$mp_id] = $row;
+        // --- Case 2: raw API response as returned by mpGetAllProducts/mpFetchAll ---
+        if (isset($api_cache['json']['data']) && is_array($api_cache['json']['data'])) {
+            $list = $api_cache['json']['data'];
+        } else {
+            $list = $api_cache; // if raw array of mp products
         }
         
+        foreach ($list as $row) {
+            if (!is_array($row)) continue;
+            
+            // parent product itself
+            if (isset($row['ext_ref']) && $row['ext_ref'] !== '') {
+                $ext_ref = trim($row['ext_ref']);
+                $mpByExtRef[$ext_ref] = $row;
+            } else {
+                // no ext_ref -> candidate for delete
+                if (isset($row['id'])) {
+                    $mp_id = (int)$row['id'];
+                    $mpDelete[$mp_id] = $row;
+                }
+            }
+            
+            // also index variants, if present
+            /*if (isset($row['variants']) && !empty($row['variants']) && is_array($row['variants'])) {
+                foreach ($row['variants'] as $variant) {
+                    if (!is_array($variant)) continue;
+                    
+                    // copy some parent data into variant
+                    $variant['type']          = 'variant';
+                    $variant['name']          = isset($row['name']) ? $row['name'] : null;
+                    $variant['category_id']   = isset($row['category_id'])   ? $row['category_id']   : null;
+                    $variant['category_name'] = isset($row['category_id']) && !empty($row['category_id'])
+                                                  ? (isset($row['category_name']) ? $row['category_name'] : null)
+                                                  : null;
+                    $variant['categories']    = isset($row['category_id']) && !empty($row['category_id'])
+                                                  ? (isset($row['categories']) ? $row['categories'] : null)
+                                                  : null;
+                    $variant['status']        = isset($row['status']) ? $row['status'] : null;
+                    
+                    if (isset($variant['ext_ref']) && $variant['ext_ref'] !== '') {
+                        $ext_ref = trim($variant['ext_ref']);
+                        $mpByExtRef[$ext_ref] = $variant;
+                    } else {
+                        if (isset($variant['id'])) {
+                            $mp_id = (int)$variant['id'];
+                            $mpDelete[$mp_id] = $variant;
+                        }
+                    }
+                }
+            }*/
+        }
+        
+        return array(
+            'mp_extref' => $mpByExtRef,
+            'mp_delete' => $mpDelete
+        );
     }
     
-    return $mpDelete;
-}
-*/
+    // v1 normalize MP products by ext_ref (basic, multi-variant and variants - listed as product with ext_ref) !! needs review and refactor !!!
+    ///public function normalizeMpProductsFromApiCache(array $records, $store_slug) {
+    public function normalizeMpProductsFromApiCache(array $records) {
+        $mpByExtRef = array();
+        $mpDelete   = array();
+        ///$total      = 0;
+        ///$totalvariants = 0;
+        
+        $list = array();
+        if (isset($records['json']['data']) && is_array($records['json']['data'])) {
+            $list = $records['json']['data'];
+        } else {
+            $list = $records['mp_extref']; // if raw array of mp products
+        }
     
+        foreach ($list as $row) {
+            if (!is_array($row)) continue;
+            ///$total++;
+            
+            /// normalize base fields
+            /*
+            $normalized = array(
+                'id'                => isset($row['id']) ? (int)$row['id'] : null,
+                'type'              => isset($row['type']) ? $row['type'] : null,
+                'sku'               => isset($row['sku']) ? $row['sku'] : null,
+                'ext_ref'           => isset($row['ext_ref']) ? trim($row['ext_ref']) : '',
+                
+                'name'              => isset($row['name']) ? $row['name'] : null,
+                
+                'inventory_enabled' => !empty($row['inventory_enabled']) ? true : false,
+                'stock'             => isset($row['stock']) ? (float)$row['stock'] : 0,
+                
+                'category_id'       => isset($row['category_id']) ? (int)$row['category_id'] : null,
+                'category_name'     => isset($row['category_name']) ? $row['category_name'] : null,
+                'categories'        => isset($row['categories']) && is_array($row['categories'])
+                                       ? $row['categories']
+                                       : array(),
+                
+                'price_net'         => isset($row['price_net']) ? (float)$row['price_net'] : 0.0,
+                'price_gross'       => isset($row['price_gross']) ? (float)$row['price_gross'] : 0.0,
+                
+                'old_price_net'   => isset($row['old_price_net']) ? (float)$row['old_price_net'] : null,
+                'old_price_gross' => isset($row['old_price_gross']) ? (float)$row['old_price_gross'] : null,
+                
+                'tax_id'            => isset($row['tax_id']) ? (int)$row['tax_id'] : null,
+                
+                // for variants you can later enrich with parent_id, etc.
+                //'parent_id'         => isset($row['parent_id']) ? (int)$row['parent_id'] : null,
+                //'variant_attributes'=> isset($row['variant_attributes']) && is_array($row['variant_attributes'])
+                //                       ? $row['variant_attributes']
+                //                       : array(),
+                
+                'status'            => isset($row['status']) ? $row['status'] : null,
+            );
+            
+            if ($normalized['ext_ref'] !== '') {
+                $mpByExtRef[$normalized['ext_ref']] = $normalized;
+            } else {
+                if ($normalized['id'] !== null) {
+                    $mpDelete[$normalized['id']] = $normalized;
+                }
+            }
+            
+            // If $row['variants'] exists, you can loop them here and push
+            // each variant as its own normalized entry in mp_extref/mp_delete.
+            if (isset($row['variants']) && !empty($row['variants'])) {
+                if (!is_array($row['variants'])) continue;
+                foreach($row['variants'] as $variant) {
+                    if (!is_array($variant)) continue;
+                    $totalvariants++;
+                    $variant['type'] = 'variant';
+                    $variant['name'] = $row['name'];
+                    $variant['category_id'] = $row['category_id'];
+                    $variant['category_name'] = $row['category_id'] ? $row['category_name'] : null;
+                    $variant['categories'] = $row['category_id'] ? $row['categories'] : null;
+                    $variant['status'] = $row['status'];
+                    if (isset($variant['ext_ref']) && !empty($variant['ext_ref'])) {
+                        $mpByExtRef[$variant['ext_ref']] = $variant;
+                    }
+                    elseif (isset($variant['id']) && !empty($variant['id'])) {
+                        $mpDelete[$variant['id']] = $variant;
+                    }
+                }
+            }
+            */
+            // parent product itself
+            if (isset($row['ext_ref']) && $row['ext_ref'] !== '') {
+                $ext_ref = trim($row['ext_ref']);
+                $mpByExtRef[$ext_ref] = $row;
+            } else {
+                // no ext_ref -> candidate for delete
+                if (isset($row['id'])) {
+                    $mp_id = (int)$row['id'];
+                    $mpDelete[$mp_id] = $row;
+                }
+            }
+            
+            // also index variants, if present
+            if (isset($row['variants']) && !empty($row['variants']) && is_array($row['variants'])) {
+                foreach ($row['variants'] as $variant) {
+                    if (!is_array($variant)) continue;
+                    
+                    // copy some parent data into variant
+                    $variant['type']          = 'variant';
+                    $variant['name']          = isset($row['name']) ? $row['name'] : null;
+                    $variant['category_id']   = isset($row['category_id'])   ? $row['category_id']   : null;
+                    $variant['category_name'] = isset($row['category_id']) && !empty($row['category_id'])
+                                                  ? (isset($row['category_name']) ? $row['category_name'] : null)
+                                                  : null;
+                    $variant['categories']    = isset($row['category_id']) && !empty($row['category_id'])
+                                                  ? (isset($row['categories']) ? $row['categories'] : null)
+                                                  : null;
+                    $variant['status']        = isset($row['status']) ? $row['status'] : null;
+                    
+                    if (isset($variant['ext_ref']) && $variant['ext_ref'] !== '') {
+                        $ext_ref = trim($variant['ext_ref']);
+                        $mpByExtRef[$ext_ref] = $variant;
+                    } else {
+                        if (isset($variant['id'])) {
+                            $mp_id = (int)$variant['id'];
+                            $mpDelete[$mp_id] = $variant;
+                        }
+                    }
+                }
+            }
+            
+        }
+    
+        return array(
+            //'meta' => array(
+            //    'store_slug'           => $store_slug,
+            //    'generated'            => time(),
+            //    'source'               => 'mp_api',
+            //    'total_products'       => $total,
+            //    'total_variants'       => $totalvariants,
+            //    'total_with_ext_ref'   => count($mpByExtRef),
+            //    'total_without_ext_ref'=> count($mpDelete),
+            //    'api_meta'             => isset($records['json']['meta']) ? $records['json']['meta'] : array()
+            //),
+            'mp_extref' => $mpByExtRef,
+            'mp_delete' => $mpDelete
+        );
+    }
+    // v2 normalize MP products by ext_ref (basic and multi-variant only - variants are defined inside multi-variant)
+    public function normalizeMpProductsApiCache(array $records, $store_slug) {
+        /* // Use the same index builder as checkOCagainstMPapi
+        $idx = $this->buildMpIndexFromApiCache($records);
+        
+        $total_with_ext_ref    = isset($idx['mp_extref']) ? count($idx['mp_extref']) : 0;
+        $total_without_ext_ref = isset($idx['mp_delete']) ? count($idx['mp_delete']) : 0;
+        $total_products        = $total_with_ext_ref + $total_without_ext_ref;
+        
+        $meta = array(
+            'store_slug'           => $store_slug,
+            'generated'            => time(),
+            'source'               => 'mp_api',
+            'total_products'       => $total_products,
+            'total_with_ext_ref'   => $total_with_ext_ref,
+            'total_without_ext_ref'=> $total_without_ext_ref,
+            'api_meta'             => isset($records['json']['meta']) ? $records['json']['meta'] : array()
+        );
+        
+        return array(
+            'meta'     => $meta,
+            'mp_extref'=> isset($idx['mp_extref']) ? $idx['mp_extref'] : array(),
+            'mp_delete'=> isset($idx['mp_delete']) ? $idx['mp_delete'] : array()
+        );
+        */
+        $mpByExtRef = array();
+        $mpDelete   = array();
+        $total      = 0;
+        ///$totalvariants = 0;
+    
+        // your current MP /api/v2/products data list
+        $list = array();
+        if (isset($records['json']['data']) && is_array($records['json']['data'])) {
+            $list = $records['json']['data'];
+        }
+    
+        foreach ($list as $row) {
+            if (!is_array($row)) continue;
+            $total++;
+    
+            /*// normalize base fields
+            $normalized = array(
+                'id'                => isset($row['id']) ? (int)$row['id'] : null,
+                'type'              => isset($row['type']) ? $row['type'] : null,
+                'sku'               => isset($row['sku']) ? $row['sku'] : null,
+                'ext_ref'           => isset($row['ext_ref']) ? trim($row['ext_ref']) : '',
+                
+                'name'              => isset($row['name']) ? $row['name'] : null,
+                
+                'inventory_enabled' => !empty($row['inventory_enabled']) ? $row['inventory_enabled'] : 'on', // on/off
+                'stock'             => isset($row['stock']) ? (float)$row['stock'] : 0,
+                
+                'category_id'       => isset($row['category_id']) ? (int)$row['category_id'] : null,
+                'category_name'     => isset($row['category_name']) ? $row['category_name'] : null,
+                'categories'        => isset($row['categories']) && is_array($row['categories'])
+                                       ? $row['categories']
+                                       : array(),
+                
+                'price_net'         => isset($row['price_net']) ? (float)$row['price_net'] : 0.0,
+                'price_gross'       => isset($row['price_gross']) ? (float)$row['price_gross'] : 0.0,
+                
+                'old_price_net'   => isset($row['old_price_net']) ? (float)$row['old_price_net'] : null,
+                'old_price_gross' => isset($row['old_price_gross']) ? (float)$row['old_price_gross'] : null,
+                
+                'tax_id'            => isset($row['tax_id']) ? (int)$row['tax_id'] : null,
+                
+                // for variants you can later enrich with parent_id, etc.
+                //'parent_id'         => isset($row['parent_id']) ? (int)$row['parent_id'] : null,
+                //'variant_attributes'=> isset($row['variant_attributes']) && is_array($row['variant_attributes'])
+                //                       ? $row['variant_attributes']
+                //                       : array(),
+                
+                'status'            => isset($row['status']) ? $row['status'] : null,
+            );
+            
+            if ($normalized['ext_ref'] !== '') {
+                $mpByExtRef[$normalized['ext_ref']] = $normalized;
+            } else {
+                if ($normalized['id'] !== null) {
+                    $mpDelete[$normalized['id']] = $normalized;
+                }
+            }
+            */
+            if ( !empty($row['ext_ref']) ) {
+                $mpByExtRef[$row['ext_ref']] = $row;
+            } else {
+                if ( !empty($row['id']) ) {
+                    $mpDelete[$row['id']] = $row;
+                }
+            }
+            
+            /*// If $row['variants'] exists, you can loop them here and push
+            // each variant as its own normalized entry in mp_extref/mp_delete.
+            if (isset($row['variants']) && !empty($row['variants'])) {
+                if (!is_array($row['variants'])) continue;
+                foreach($row['variants'] as $variant) {
+                    if (!is_array($variant)) continue;
+                    $totalvariants++;
+                    $variant['type'] = 'variant';
+                    $variant['name'] = $row['name'];
+                    $variant['category_id'] = $row['category_id'];
+                    $variant['category_name'] = $row['category_id'] ? $row['category_name'] : null;
+                    $variant['categories'] = $row['category_id'] ? $row['categories'] : null;
+                    $variant['status'] = $row['status'];
+                    if (isset($variant['ext_ref']) && !empty($variant['ext_ref'])) {
+                        $mpByExtRef[$variant['ext_ref']] = $variant;
+                    }
+                    elseif (isset($variant['id']) && !empty($variant['id'])) {
+                        $mpDelete[$variant['id']] = $variant;
+                    }
+                }
+            }
+            */
+        }
+    
+        return array(
+            'meta' => array(
+                'store_slug'           => $store_slug,
+                'generated'            => time(),
+                'source'               => 'mp_api',
+                'total_products'       => $total,
+                ///'total_variants'       => $totalvariants,
+                'total_with_ext_ref'   => count($mpByExtRef),
+                'total_without_ext_ref'=> count($mpDelete),
+                'api_meta'             => isset($records['json']['meta']) ? $records['json']['meta'] : array()
+            ),
+            'mp_extref' => $mpByExtRef,
+            'mp_delete' => $mpDelete
+        );
+    }
+    
+    
+    public function saveMpApiProductsCache($store_slug, array $cache, $existing_file = '') {
+        // ensure basic structure
+        if (!isset($cache['meta']) || !is_array($cache['meta'])) {
+            $cache['meta'] = array();
+        }
+        if (!isset($cache['mp_extref']) || !is_array($cache['mp_extref'])) {
+            $cache['mp_extref'] = array();
+        }
+        if (!isset($cache['mp_delete']) || !is_array($cache['mp_delete'])) {
+            $cache['mp_delete'] = array();
+        }
+        
+        // update meta
+        $cache['meta']['store_slug']           = $store_slug;
+        $cache['meta']['generated']            = time();
+        $cache['meta']['source']               = 'mp_api_action';
+        $cache['meta']['total_with_ext_ref']   = count($cache['mp_extref']);
+        $cache['meta']['total_without_ext_ref']= count($cache['mp_delete']);
+        $cache['meta']['total_products']       = $cache['meta']['total_with_ext_ref'] + $cache['meta']['total_without_ext_ref'];
+        
+        if ($existing_file && file_exists($existing_file)) {
+            $cachefile = $existing_file;
+        } else {
+            $cachefile = DIR_LOGS . $store_slug . '_mp-export_api-products-cache_' . date('Y-m-d') . '.json';
+        }
+        
+        $tmp = $cachefile . '.tmp';
+        file_put_contents(
+            $tmp,
+            json_encode($cache, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT),
+            LOCK_EX
+        );
+        @rename($tmp, $cachefile);
+        
+        return $cachefile;
+    }
+    
+    public function updateMpApiProductsCacheAfterAction(&$cache, $action, array $mpPayload, array $resp) {
+        // ensure structure
+        if (!isset($cache['mp_extref']) || !is_array($cache['mp_extref'])) {
+            $cache['mp_extref'] = array();
+        }
+        if (!isset($cache['mp_delete']) || !is_array($cache['mp_delete'])) {
+            $cache['mp_delete'] = array();
+        }
+        
+        $action = strtolower($action); // 'patch', 'post', 'delete'
+        
+        $ext_ref = '';
+        if (isset($mpPayload['ext_ref'])) {
+            $ext_ref = trim($mpPayload['ext_ref']);
+        } elseif (!empty($resp['json']['ext_ref'])) {
+            $ext_ref = trim($resp['json']['ext_ref']);
+        }
+        
+        $mp_id = null;
+        if (!empty($resp['json']['id'])) {
+            $mp_id = (int)$resp['json']['id'];
+        } elseif (!empty($mpPayload['id'])) {
+            $mp_id = (int)$mpPayload['id'];
+        }
+        
+        // DELETE: remove from mp_extref and mp_delete
+        if ($action === 'delete') {
+            if ($ext_ref !== '' && isset($cache['mp_extref'][$ext_ref])) {
+                unset($cache['mp_extref'][$ext_ref]);
+            }
+            if ($mp_id !== null && isset($cache['mp_delete'][$mp_id])) {
+                unset($cache['mp_delete'][$mp_id]);
+            }
+            return;
+        }
+        
+        // For PATCH / POST we want a merged snapshot
+        $newData = array();
+        if (!empty($resp['json']) && is_array($resp['json'])) {
+            $newData = $resp['json'];
+        }
+        
+        // Start from existing row (if any)
+        $existing = array();
+        if ($ext_ref !== '' && isset($cache['mp_extref'][$ext_ref])) {
+            $existing = $cache['mp_extref'][$ext_ref];
+        } elseif ($mp_id !== null && isset($cache['mp_delete'][$mp_id])) {
+            $existing = $cache['mp_delete'][$mp_id];
+        }
+        
+        // Merge: existing -> API response -> payload (payload wins for fields you explicitly set)
+        //$merged = array_merge($existing, $newData, $mpPayload);
+        // Merge: existing -> API response (api wins)
+        $merged = array_merge($existing, $newData);
+        
+        if ($mp_id !== null && !isset($merged['id'])) {
+            $merged['id'] = $mp_id;
+        }
+        if ($ext_ref !== '' && !isset($merged['ext_ref'])) {
+            $merged['ext_ref'] = $ext_ref;
+        }
+        
+        // Put into the right bucket
+        if ($ext_ref !== '') {
+            $cache['mp_extref'][$ext_ref] = $merged;
+            if ($mp_id !== null && isset($cache['mp_delete'][$mp_id])) {
+                unset($cache['mp_delete'][$mp_id]);
+            }
+        } elseif ($mp_id !== null) {
+            $cache['mp_delete'][$mp_id] = $merged;
+        }
+    }
+
     /* === start of get Product details for MerchantPro API actions === */
     
     // Build a minimal OC product row for MP sync. // used for getProductDetailsForMP(). 
@@ -1937,11 +2326,40 @@ protected function buildMpDeleteFromApiCache(array $api_cache) {
         //$product_type = empty($this->getProductSelectOptions($product_id)) ? 'simple' : 'variable';
         
         $mp_id = null;
-        // get MP products from cache or build that cache
-        $mp_cache = $this->getConsolidatedMPcache();
-        $mp_products = isset($mp_cache['map']) ? $mp_cache['map'] : array();
-        if( isset($mp_products[$product_id]) ) {
-            $mp_id = $mp_products[$product_id]['mp_id'];
+        
+        // get MP products from api cache
+        $this->load->model('setting/setting');
+        $settings = $this->model_setting_setting->getSetting('sdx_export_to_mp_sync');
+        $api = isset($settings['sdx_export_to_mp_sync_api']) ? $settings['sdx_export_to_mp_sync_api'] : array();
+        $store_slug = $this->deriveStoreSlugFromApi($api);
+        
+        $mp_api_cache = $this->loadMpApiProductsCache($store_slug, 0); // no TTL 
+        
+        // get MP products from consolidated feed cache or build that cache
+        $mp_feed_cache = $this->getConsolidatedMPcache();
+        
+        //$mp_products = isset($mp_feed_cache['map']) ? $mp_feed_cache['map'] : array();
+        //$mp_products = isset($mp_api_cache['data']['mp_extref']) ? $mp_api_cache['data']['mp_extref'] : (isset($mp_feed_cache['map']) ? $mp_feed_cache['map'] : array());
+        
+        //if( isset($mp_products[$product_id]) ) {
+        //    $mp_id = $mp_products[$product_id]['mp_id'];
+        //}
+        $mp_variants = array();
+        if(isset($mp_api_cache['data']['mp_extref'])) {
+            $mp_products = $mp_api_cache['data']['mp_extref'];
+            if( isset($mp_products[$product_id]) ) {
+                $mp_id = $mp_products[$product_id]['id'];
+                
+                if( isset($mp_products[$product_id]['variants']) ) {
+                    $mp_variants = $mp_products[$product_id]['variants'];
+                }
+            }
+        }
+        elseif( isset($mp_feed_cache['map']) ) {
+            $mp_products = $mp_feed_cache['map'];
+            if( isset($mp_products[$product_id]) ) {
+                $mp_id = $mp_products[$product_id]['mp_id'];
+            }
         }
         
         $ocproduct = array(
@@ -1949,6 +2367,7 @@ protected function buildMpDeleteFromApiCache(array $api_cache) {
             'product_id'      => $product_id,
             'product_id_base' => $product_id,           // for compatibility with your earlier code
             'mp_id'           => $mp_id,                // null => POST, >0 => PATCH
+            'mp_variants'     => $mp_variants,          // empty => simple, not-empty => variable (variant ids needed for patch if available)
             'model'           => $row['model'],
             'ext_ref'         => $product_id,
             'name'            => $row['name'],
@@ -1967,7 +2386,7 @@ protected function buildMpDeleteFromApiCache(array $api_cache) {
         
         $error = '';
         
-        // --- Decide MP product type based on OC product_type ---
+        // --- Check OC product_type ---
         if (!isset($ocproduct['product_type'])) {
             return array(
                 'success'               => false,
@@ -1976,7 +2395,7 @@ protected function buildMpDeleteFromApiCache(array $api_cache) {
                 'missing_categories'    => array()
             );
         }
-        
+        // --- Decide MP product type based on OC product_type ---
         if ($ocproduct['product_type'] === 'simple') {
             $mp_type = 'basic';
         } elseif ($ocproduct['product_type'] === 'variable') {
@@ -2128,9 +2547,10 @@ protected function buildMpDeleteFromApiCache(array $api_cache) {
         $qty_multiplier = 1;
         if (!empty($pdsql['minimum']) && (int)$pdsql['minimum'] > 1) {
             $qty_multiplier = (int)$pdsql['minimum'];
-        } elseif (!empty($pdsql['name']) && stripos($pdsql['name'], 'banda led') !== false) {
-            $qty_multiplier = 5;
-        }
+        } 
+        //elseif (!empty($pdsql['name']) && stripos($pdsql['name'], 'banda led') !== false) {
+        //    $qty_multiplier = 5;
+        //}
         
         // --- Categories: map OC category_ids -> MP category_id + categories[] ---
         $oc_categories = array();
@@ -2212,6 +2632,7 @@ protected function buildMpDeleteFromApiCache(array $api_cache) {
         
         // --- Multi-variant product: build variant_attributes + variants from OC options ---
         if ($mp_type === 'multi_variant') {
+            
             $select_options = $this->getProductSelectOptions($product_id);
             
             if (!empty($select_options)) {
@@ -2222,6 +2643,14 @@ protected function buildMpDeleteFromApiCache(array $api_cache) {
                     $price_net,
                     $price_gross
                 );
+                
+                unset($product['stock']); // error on PATCH if stock is present in parent
+                unset($product['price_net']); // error on PATCH if price_net is present in parent
+                unset($product['price_gross']); // error on PATCH if price_gross is present in parent
+                unset($product['old_price_net']); // error on PATCH if old_price_net is present in parent
+                unset($product['old_price_gross']); // error on PATCH if old_price_gross is present in parent
+                unset($product['weight']); // error on PATCH if weight is present in parent
+                
                 $product['variant_attributes'] = $variant_data['variant_attributes'];
                 $product['variants']           = $variant_data['variants'];
             } else {
@@ -2515,9 +2944,16 @@ protected function buildMpDeleteFromApiCache(array $api_cache) {
                 
                 $variant_sku = $base_sku . '_' . $suffix;
                 $variant_ext_ref = $base_ref !== '' ? $base_ref . '_' . $suffix : $ocproduct['product_id_base'] . '_' . $suffix;
+                $variant_id = null;
+                // check for variant sku (needed for patch only, post does not use it)
+                if( isset($ocproduct['mp_variants']) && !empty($ocproduct['mp_variants']) ){
+                    if( $ocproduct['mp_variants']['sku'] == $variant_sku && isset($ocproduct['mp_variants']['id']) ){
+                        $variant_id = $ocproduct['mp_variants']['id'];
+                    }
+                }
                 
                 $variants[] = array(
-                    // For create we usually omit id; for PATCH you can fill it later if you fetch them from MP
+                    'id'                => $variant_id, // null for POST, original MP variant id for PATCH
                     'sku'               => $variant_sku,
                     'ext_ref'           => $variant_ext_ref,
                     'inventory_enabled' => 'on',

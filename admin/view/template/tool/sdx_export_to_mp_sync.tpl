@@ -1,6 +1,6 @@
 <?php echo $header; ?>
 
-<!-- v1.5 template SDxExportToMPSync -->
+<!-- v1.5.3 template SDxExportToMPSync -->
 
 <style type="text/css">
 /* Small helper styles (OC1.5 safe) */
@@ -110,6 +110,38 @@
         
         <div class="content" style="margin-bottom: 0; min-height: auto; background: lightyellow; padding: .5em;">
             
+            <!-- MerchatPro Taxonomies from API -->
+            <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
+                <?php echo $mptaxes_source . ' <br> <small>' . $mptaxdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mptaxes_file).'</strong>'; ?>
+                <br>
+                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/mpGetTaxonomies', 'token=' . $token, 'SSL'); ?>" class="button link">
+                    <span class="<?php echo ($updatemptaxes ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $button_get_mp_taxonomies; ?>
+                </a>
+                <br><?php echo $this->language->get('text_get_mp_taxonomies_help'); ?>
+            </div>
+            
+            <!-- MerchatPro Categories from API -->
+            <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
+                <?php echo $mpcategories_source . ' <br> <small>' . $mpcatsdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mpcategories_file).'</strong>'; ?>
+                <br>
+                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/buildMPallCategoriesCache', 'token=' . $token, 'SSL'); ?>" class="button link">
+                    <span class="<?php echo ($updatempcats ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_categories'); ?>
+                </a>
+            </div>
+            
+            <!-- MerchatPro Products from API -->
+            <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
+                <?php echo $mpproducts_source . ' <br> <small>' . $mpprodsdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mpproducts_file).'</strong>'; ?>
+                <br>
+                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/buildMPallProductsCache', 'token=' . $token, 'SSL'); ?>" class="button link">
+                    <span class="<?php echo ($updatempprods ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_products'); ?> (from api)
+                </a>
+                <br><br>
+                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/buildMPallProductsCache', 'token=' . $token . '&force_api=false', 'SSL'); ?>" class="button link">
+                    <span class="<?php echo ($updatempprods ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_products'); ?> (from cache)
+                </a>
+            </div>
+            
             <!-- MerchatPro Categories from XLSX Consolidated Feed -->
             <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
                 <?php if (!empty($mp_export_consolidated_file)) { ?>
@@ -137,7 +169,7 @@
                     </a>
                 </small>
                 <?php } ?>
-                    
+                
                 <?php if (!empty($mp_export_variants_file)) { ?>
                 <br>
                 <small>
@@ -146,35 +178,6 @@
                     </a>
                 </small>
                 <?php } ?>
-                
-            </div>
-            
-            <!-- MerchatPro Products from API -->
-            <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
-                <?php echo $mpproducts_source . ' <br> <small>' . $mpprodsdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mpproducts_file).'</strong>'; ?>
-                <br>
-                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/buildMPallProductsCache', 'token=' . $token, 'SSL'); ?>" class="button link">
-                    <span class="<?php echo ($updatempprods ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_products'); ?>
-                </a>
-            </div>
-            
-            <!-- MerchatPro Categories from API -->
-            <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
-                <?php echo $mpcategories_source . ' <br> <small>' . $mpcatsdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mpcategories_file).'</strong>'; ?>
-                <br>
-                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/buildMPallCategoriesCache', 'token=' . $token, 'SSL'); ?>" class="button link">
-                    <span class="<?php echo ($updatempcats ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $this->language->get('button_get_mp_categories'); ?>
-                </a>
-            </div>
-            
-            <!-- MerchatPro Taxonomies from API -->
-            <div style="display: inline-table; padding: .25em; border-right: .1em solid green;">
-                <?php echo $mptaxes_source . ' <br> <small>' . $mptaxdate . '</small> <br> => <strong>'.str_replace(DIR_LOGS, '', $mptaxes_file).'</strong>'; ?>
-                <br>
-                <a href="<?php echo $this->url->link('tool/sdx_export_to_mp_sync/mpGetTaxonomies', 'token=' . $token, 'SSL'); ?>" class="button link">
-                    <span class="<?php echo ($updatemptaxes ? 'warning' : 'attention'); ?>" style="padding: .25em 1.5em;"></span> &nbsp; <?php echo $button_get_mp_taxonomies; ?>
-                </a>
-                <br><?php echo $this->language->get('text_get_mp_taxonomies_help'); ?>
             </div>
             
         </div>
@@ -256,16 +259,25 @@
                                                 <div class="nowrap">Product Base ID: <strong><?php echo $p['product_id_base']; ?></strong></div>
                                                 <div class="nowrap">
                                                     <a href="<?php echo $p['view_product']; ?>" target="_blank">view</a>
+                                                    >> OC << &nbsp; 
                                                     <a href="<?php echo $p['edit_product']; ?>" target="_blank">edit</a>
                                                 </div>
-                                                <div class="prod-id"><small>ext_ref: <strong><?php echo $p['ext_ref']; ?></strong></small></div>
+                                                <div class="prod-id">
+                                                    <small>oc ext_ref: <strong><?php echo $p['ext_ref']; ?></strong></small>
+                                                    <?php if (!empty($p['mp_product'])) { ?>
+                                                    <br>
+                                                    <i><small>mp ext_ref: <strong><?php echo $p['mp_product']['ext_ref']; ?></strong></small></i>
+                                                    <?php } ?>
+                                                </div>
                                             </div>
                                         </div>
                                     </td>
                                     
                                     <td class="left">
                                         <div class="name-block">
-                                            <div><strong><?php echo $p['name']; ?></strong></div>
+                                            <div>
+                                                <strong><?php echo $p['name']; ?></strong>
+                                            </div>
                                             <div class="small">
                                                 <?php if ($p['model'] != '') { ?><span class="nowrap">Model: <strong><?php echo $p['model']; ?></strong></span><?php } ?>
                                                 <?php if ($p['product_type'] == 'variant') { ?><br> <span class="nowrap">(<small>Model_Base: <strong><?php echo $p['model_base']; ?></strong></small>)</span><?php } ?>
@@ -273,6 +285,17 @@
                                                 <?php if ($p['product_type'] == 'variant' && $p['sku_base'] != '') { ?><br> &nbsp; <span class="nowrap">(<small>SKU_Base: <strong><?php echo $p['sku_base']; ?></strong></small>)</span><?php } ?>
                                                 <?php if ($p['mpn'] != '') { ?> &nbsp; <span class="nowrap">MPN: <strong><?php echo $p['mpn']; ?></strong></span><?php } ?>
                                             </div>
+                                            <?php if (!empty($p['mp_product'])) { ?>
+                                            <hr>
+                                            <div>
+                                                <i><strong><?php echo $p['mp_product']['name']; ?></strong></i>
+                                            </div>
+                                            <div class="small">
+                                                <span class="nowrap"><i>SKU: <strong><?php echo $p['mp_product']['sku']; ?></strong></i></span> &nbsp; 
+                                                <span class="nowrap"><i>( <strong><?php echo $p['mp_product']['type']; ?></strong> )</i></span>
+                                                
+                                            </div>
+                                            <?php } ?>
                                         </div>
                                     </td>
                                     
@@ -302,7 +325,12 @@
                                         <div class="status-block">
                                             
                                             <span class="mp-sync-badge mp-sync-<?php echo $p['mp_sync_status_code']; ?>">
-                                                <?php echo htmlspecialchars($p['mp_sync_status']); ?>
+                                                <?php echo htmlspecialchars($p['mp_sync_status']); ?> &nbsp; 
+                                                
+                                                <?php if (!empty($p['mp_product'])) { ?>
+                                                <span class="nowrap">MP ID: <?php echo $p['mp_product']['id']; ?></span>
+                                                <?php } ?>
+                                                
                                             </span>
                                             
                                             <?php if (!empty($p['mp_sync_issues'])) { ?>
@@ -315,13 +343,22 @@
                                             
                                             <hr>
                                             <?php if ($p['status'] == 1 && $p['product_type'] != 'variant' && $p['mp_sync_status_code'] != 'collision') { ?>
-                                            Select <input type="checkbox" name="export-product[]" value="<?php echo $p['product_id_base']; ?>">
+                                            Select <input type="checkbox" name="export-product[]" value="<?php echo $p['product_id_base']; ?>"><br>
                                             <form action="<?php echo $apply_mp_products_sync; ?>" method="post" style="display:inline;">
-                                                <input type="hidden" name="product_action" value="patch" />
                                                 <input type="hidden" name="oc_product_id" value="<?php echo (int)$p['product_id_base']; ?>" />
+                                                
+                                                <?php if ( !empty($p['mp_product']) && isset($p['mp_product']['id']) ) { ?>
+                                                <input type="hidden" name="product_action" value="patch" />
                                                 <a href="#" class="button link" onclick="this.closest('form').submit(); return false;">
                                                     <?php echo $button_mp_force_patch; ?>
                                                 </a>
+                                                <?php } else { ?>
+                                                <input type="hidden" name="product_action" value="post" />
+                                                <a href="#" class="button link" onclick="this.closest('form').submit(); return false;">
+                                                    <?php echo $button_mp_force_post; ?>
+                                                </a>
+                                                <?php } ?>
+                                                
                                             </form>
                                             <?php } else { ?>
                                             <span class="muted">export <?php echo $text_disabled; ?></span>
