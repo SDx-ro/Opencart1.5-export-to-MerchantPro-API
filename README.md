@@ -191,8 +191,7 @@ The system is optimized for large product catalogs and repeated exports.
 
 📜 License
 
-This project is proprietary and intended for specific deployment.
-Redistribution is not permitted unless explicitly authorized.
+This project is GPLv3 licensed and intended for specific deployment.
 
 
 🤝 Contributions
