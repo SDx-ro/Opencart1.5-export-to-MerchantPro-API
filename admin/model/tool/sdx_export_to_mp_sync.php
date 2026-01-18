@@ -1276,7 +1276,15 @@ class ModelToolSdxExportToMPSync extends Model {
                 
                 $oc_product['mp_id'] = $mp_product['mp_id'];
                 
-                $oc_product['mp_product'] = $mp_product;
+                $mp_product_info = array();
+                $mp_product_info['ext_ref'] = $mp_product['mp_ext_ref'];
+                $mp_product_info['sku'] = $mp_product['mp_sku'];
+                $mp_product_info['type'] = $mp_product['mp_type'];
+                $mp_product_info['id'] = $mp_product['mp_id'];
+                $mp_product_info['name'] = $mp_product['mp_name'];
+                $oc_product['mp_product'] = $mp_product_info;
+                unset($mp_product_info);
+                //$oc_product['mp_product'] = $mp_product;
                 
                 $oc_product['mp_sync_status_code'] = $mp_sync_status_code;
                 $oc_product['mp_sync_status'] = $mp_sync_status;
@@ -1602,6 +1610,11 @@ class ModelToolSdxExportToMPSync extends Model {
                 
                 $oc_product['mp_id'] = $mp_product['id'];
                 
+                //$mp_product_info = array();
+                //$mp_product_info['ext_ref'] = $mp_product['ext_ref'];
+                //$mp_product_info['name'] = $mp_product['name'];
+                //$oc_product['mp_product'] = $mp_product_info;
+                //unset($mp_product_info);
                 $oc_product['mp_product'] = $mp_product;
                 
                 $oc_product['mp_sync_status_code']  = $mp_sync_status_code;
