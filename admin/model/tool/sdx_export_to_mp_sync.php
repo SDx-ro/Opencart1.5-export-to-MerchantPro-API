@@ -1020,7 +1020,10 @@ class ModelToolSdxExportToMPSync extends Model {
             // compute ext_ref_base safely (for variants only)
             $ext_base = $ext_val;
             $pos = strpos($ext_val, '_');
-            if ($pos === true) $ext_base = substr($ext_val, 0, $pos);
+            //if ($pos === true) $ext_base = substr($ext_val, 0, $pos);
+            if ($pos !== false && $pos > 0) {
+                $ext_base = substr($ext_val, 0, $pos);
+            }
             
             $mp_sku = ($idx_sku !== -1 && isset($row[$idx_sku])) ? trim((string)$row[$idx_sku]) : ''; // if $row[$idx_sku] is not determined, maybe put null to mark error as sku is mandatory
             $mp_sku_base = ($idx_sku_base !== -1 && isset($row[$idx_sku_base])) ? trim((string)$row[$idx_sku_base]) : ''; // if $row[$idx_sku_base] is not determined, maybe put null to mark missing mp_sku_base (as in consolidated xlsx file)
@@ -2600,6 +2603,34 @@ class ModelToolSdxExportToMPSync extends Model {
             }
         }
         
+        // --- Images for MP payload (array of {url:...}) using $pdsql['image']
+        $images = array();
+        // main product image first
+        if (!empty($pdsql['image'])) {
+            $u = $this->makeImageUrl($pdsql['image']);
+            if ($u) $images[] = array('url' => $u);
+        }
+        // additional images
+        $imgs = $this->model_catalog_product->getProductImages((int)$product_id);
+        if (!empty($imgs) && is_array($imgs)) {
+            foreach ($imgs as $r) {
+                if (empty($r['image'])) continue;
+                $u = $this->makeImageUrl($r['image']);
+                if ($u) $images[] = array('url' => $u);
+            }
+        }
+        // optional: de-duplicate by URL
+        if (!empty($images)) {
+            $seen = array();
+            $images = array_values(array_filter($images, function($it) use (&$seen) {
+                $url = isset($it['url']) ? trim($it['url']) : '';
+                if ($url === '') return false;
+                if (isset($seen[$url])) return false;
+                $seen[$url] = true;
+                return true;
+            }));
+        }
+        
         // --- Base MP product payload (no variants yet) ---
         $product = array(
             // For PATCH, MP expects id here. For POST, omit or keep null.
@@ -2957,11 +2988,42 @@ class ModelToolSdxExportToMPSync extends Model {
                 
                 $variant_sku = $base_sku . '_' . $suffix;
                 $variant_ext_ref = $base_ref !== '' ? $base_ref . '_' . $suffix : $ocproduct['product_id_base'] . '_' . $suffix;
+                
+                ///$variant_id = null;
+                /// // check for variant sku (needed for patch only, post does not use it)
+                ///if( isset($ocproduct['mp_variants']) && !empty($ocproduct['mp_variants']) ){
+                ///    if( $ocproduct['mp_variants']['sku'] == $variant_sku && isset($ocproduct['mp_variants']['id']) ){
+                ///        $variant_id = $ocproduct['mp_variants']['id'];
+                ///    }
+                ///}
+                
                 $variant_id = null;
-                // check for variant sku (needed for patch only, post does not use it)
-                if( isset($ocproduct['mp_variants']) && !empty($ocproduct['mp_variants']) ){
-                    if( $ocproduct['mp_variants']['sku'] == $variant_sku && isset($ocproduct['mp_variants']['id']) ){
-                        $variant_id = $ocproduct['mp_variants']['id'];
+                // Only attempt ID resolution when we already have an MP parent id (PATCH scenario).
+                if (!empty($ocproduct['mp_id']) && !empty($ocproduct['mp_variants']) && is_array($ocproduct['mp_variants'])) {
+                    
+                    // mp_variants normally comes as a list: [ ['id'=>..,'sku'=>..,'ext_ref'=>..], ... ]
+                    $variants_list = $ocproduct['mp_variants'];
+                    
+                    // Accept legacy associative form too (defensive).
+                    if (isset($variants_list['id'])) {
+                        $variants_list = array($variants_list);
+                    }
+                    
+                    foreach ($variants_list as $mv) {
+                        if (!is_array($mv) || empty($mv['id'])) continue;
+                        
+                        $mvExt = isset($mv['ext_ref']) ? trim((string)$mv['ext_ref']) : '';
+                        $mvSku = isset($mv['sku']) ? trim((string)$mv['sku']) : '';
+                        
+                        // Prefer ext_ref match (most stable), fallback to sku match
+                        if (($mvExt !== '' && $mvExt === $variant_ext_ref) || ($mvSku !== '' && $mvSku === $variant_sku)) {
+                            $variant_id = (int)$mv['id'];
+                            break;
+                        }
+                    }
+                    
+                    if ($variant_id !== null && $variant_id <= 0) {
+                        $variant_id = null;
                     }
                 }
                 
@@ -3234,6 +3296,25 @@ class ModelToolSdxExportToMPSync extends Model {
     
         // Uses your existing helper
         return $this->deriveStoreSlugFromUrl($base);
+    }
+    
+    // general helper to get the OC product image(s) URL
+    private function makeImageUrl($image) {
+        
+        $image = trim((string)$image);
+        if ($image === '') return '';
+        
+        $base = '';
+        if (defined('HTTPS_CATALOG') && HTTPS_CATALOG) $base = HTTPS_CATALOG;
+        elseif (defined('HTTP_CATALOG') && HTTP_CATALOG) $base = HTTP_CATALOG;
+        elseif ($this->config->get('config_ssl')) $base = $this->config->get('config_ssl');
+        elseif ($this->config->get('config_url')) $base = $this->config->get('config_url');
+        
+        $base = rtrim($base, '/') . '/';
+        $url  = $base . 'image/' . ltrim($image, '/');
+        
+        // minimal encoding for spaces
+        return str_replace(' ', '%20', $url);
     }
     
 }
